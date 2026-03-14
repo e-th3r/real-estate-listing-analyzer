@@ -1,0 +1,27 @@
+﻿# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+.env
+
+# DVC
+.dvc/cache
+.dvc/tmp
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+"*pytest"
+"*coverage"
+# Logs
+*.log
