@@ -1,4 +1,6 @@
 [core]
-    remote = nas-smb
-['remote "nas-smb"']
-    url = Z:\
+    remote = nas-ssh
+['remote "nas-ssh"']
+    url = ssh://Maxim@91.77.167.67/Dvc-data
+    keyfile = C:\Users\maxim\.ssh\dvc_synology
+    password = Gldnra1l
