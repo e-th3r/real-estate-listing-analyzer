@@ -4,6 +4,7 @@ import sys
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -34,6 +35,8 @@ HEADERS = {
     ),
     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 }
+
+CIAN_SEARCH_API_URL = "https://api.cian.ru/search-offers/v2/search-offers-desktop/"
 
 
 def fetch_cian_listing(url: str, *, timeout: int = 15) -> str:
@@ -576,10 +579,214 @@ def parse_cian_listing(html: str) -> Dict[str, Any]:
     }
 
 
+def _extract_listing_id(url: str) -> int:
+    path_parts = [part for part in urlparse(url).path.split("/") if part]
+    for part in reversed(path_parts):
+        if part.isdigit():
+            return int(part)
+    match = re.search(r"(\d{6,})", url)
+    if match:
+        return int(match.group(1))
+    raise ValueError(f"Не удалось извлечь ID объявления из URL: {url}")
+
+
+def _find_first_dict(obj: Any, target_keys: set[str]) -> Optional[Dict[str, Any]]:
+    if isinstance(obj, dict):
+        current_keys = {str(k).lower() for k in obj.keys()}
+        if target_keys <= current_keys:
+            return obj
+        for value in obj.values():
+            nested = _find_first_dict(value, target_keys)
+            if nested is not None:
+                return nested
+    elif isinstance(obj, list):
+        for value in obj:
+            nested = _find_first_dict(value, target_keys)
+            if nested is not None:
+                return nested
+    return None
+
+
+def _extract_description_from_json(data: Any) -> Optional[str]:
+    best_desc: Optional[str] = None
+    for key, value in _walk_json(data):
+        if not isinstance(value, str):
+            continue
+        key_lower = str(key).lower()
+        if key_lower not in {"description", "fulldescription", "offertext"} and "description" not in key_lower:
+            continue
+        text = value.strip()
+        if not text:
+            continue
+        if best_desc is None or len(text) > len(best_desc):
+            best_desc = text
+    return best_desc
+
+
+def _extract_images_from_json(data: Any) -> List[str]:
+    image_urls: List[str] = []
+    seen: set[str] = set()
+    for _, value in _walk_json(data):
+        if not isinstance(value, str):
+            continue
+        lower = value.lower()
+        if not any(ext in lower for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        image_urls.append(value)
+    return image_urls
+
+
+def _extract_offer_list(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return []
+    offers = data.get("offersSerialized")
+    if isinstance(offers, list):
+        return [offer for offer in offers if isinstance(offer, dict)]
+    if isinstance(offers, dict):
+        return [offers]
+    offers = data.get("offers")
+    if isinstance(offers, list):
+        return [offer for offer in offers if isinstance(offer, dict)]
+    if isinstance(offers, dict):
+        return [offers]
+    return []
+
+
+def _extract_offer_id(offer: Dict[str, Any]) -> Optional[int]:
+    for candidate_key in ["id", "offerId", "offer_id"]:
+        value = offer.get(candidate_key)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    for key, value in _walk_json(offer):
+        key_lower = str(key).lower()
+        if key_lower not in {"id", "offerid", "offer_id"}:
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    return None
+
+
+def _request_offer_candidates(listing_id: int, *, timeout: int) -> List[Dict[str, Any]]:
+    ad_types = [
+        "flatsale",
+        "flatrent",
+        "suburbansale",
+        "suburbanrent",
+        "commercialsale",
+        "commercialrent",
+    ]
+    regions = [1, 2]
+    id_filters = [
+        {"offerId": {"type": "term", "value": listing_id}},
+        {"offer_id": {"type": "term", "value": listing_id}},
+        {"id": {"type": "term", "value": listing_id}},
+    ]
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    offers_found: List[Dict[str, Any]] = []
+
+    for ad_type in ad_types:
+        for region in regions:
+            for id_filter in id_filters:
+                payload = {
+                    "jsonQuery": {
+                        "_type": ad_type,
+                        "engine_version": {"type": "term", "value": 2},
+                        "page": {"type": "term", "value": 1},
+                        "region": {"type": "terms", "value": [region]},
+                        **id_filter,
+                    }
+                }
+                response = session.post(CIAN_SEARCH_API_URL, json=payload, timeout=timeout)
+                response.raise_for_status()
+                content_type = response.headers.get("Content-Type", "")
+                if "application/json" not in content_type.lower():
+                    continue
+                parsed = response.json()
+                offers = _extract_offer_list(parsed)
+                if offers:
+                    offers_found.extend(offers)
+    return offers_found
+
+
+def scrape_cian_listing_via_cianpython(url: str, *, timeout: int = 20) -> Dict[str, Any]:
+    listing_id = _extract_listing_id(url)
+    offers = _request_offer_candidates(listing_id, timeout=timeout)
+    selected_offer: Optional[Dict[str, Any]] = None
+
+    for offer in offers:
+        offer_id = _extract_offer_id(offer)
+        if offer_id == listing_id:
+            selected_offer = offer
+            break
+
+    if selected_offer is None and offers:
+        selected_offer = offers[0]
+
+    if selected_offer is None:
+        raise RuntimeError(f"Не удалось получить объявление {listing_id} через Cian API")
+
+    price_val = _extract_first_matching_number_from_json(
+        selected_offer,
+        ["totalPrice", "price", "priceRur", "priceRub"],
+    )
+    area_val = _extract_first_matching_number_from_json(
+        selected_offer,
+        ["totalArea", "areaTotal", "area", "total_meters"],
+    )
+    floor_val = _extract_first_matching_number_from_json(
+        selected_offer,
+        ["floorNumber", "floor"],
+    )
+    floors_total_val = _extract_first_matching_number_from_json(
+        selected_offer,
+        ["floorsCount", "floorCount", "buildingFloorsCount", "floors_count"],
+    )
+    coords = _find_first_dict(selected_offer, {"lat", "lng"}) or _find_first_dict(selected_offer, {"latitude", "longitude"})
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    if coords is not None:
+        lat_raw = coords.get("lat", coords.get("latitude"))
+        lon_raw = coords.get("lng", coords.get("longitude"))
+        try:
+            lat = float(lat_raw) if lat_raw is not None else None
+            lon = float(lon_raw) if lon_raw is not None else None
+        except (TypeError, ValueError):
+            lat = None
+            lon = None
+
+    structured = ListingStructuredData(
+        price_rub=int(price_val) if price_val is not None else None,
+        total_area_m2=float(area_val) if area_val is not None else None,
+        floor=int(floor_val) if floor_val is not None else None,
+        floors_total=int(floors_total_val) if floors_total_val is not None else None,
+        latitude=lat,
+        longitude=lon,
+    )
+    artifacts = ListingArtifacts(
+        structured=structured,
+        description=_extract_description_from_json(selected_offer),
+        images=_extract_images_from_json(selected_offer),
+    )
+
+    return {
+        "structured": asdict(artifacts.structured),
+        "description": artifacts.description,
+        "images": artifacts.images,
+    }
+
+
 if __name__ == "__main__":
     # Simple manual test helper:
     example_url = input("Введите URL объявления на Циане: ").strip()
     html = fetch_cian_listing(example_url)
     data = parse_cian_listing(html)
     print(json.dumps(data, ensure_ascii=False, indent=2))
-

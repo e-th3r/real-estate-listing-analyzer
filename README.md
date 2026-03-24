@@ -1,152 +1,135 @@
-<img src="https://r2cdn.perplexity.ai/pplx-full-logo-primary-dark%402x.png" style="height:64px;margin-right:32px"/>
+# Real Estate Listing Analyzer
 
-# Real Estate Listing Analyzer 🏠📈
+Скрипт для анализа объявлений Циан с автоматической сериализацией результатов в `data/raw` и трекингом данных через DVC.
+Для хранения и синхронизации DVC-данных используется Synology NAS DS218 по SSH.
 
-## 📖 О проекте
+## Что делает проект
 
-Анализатор объявлений о недвижимости с **Циан.ру** с версионированием данных через **DVC** и хранением на **Synology NAS**.
+- Получает данные объявления по URL Циан через API-скрейпер
+- Поддерживает разбор сохраненного HTML-файла
+- Возвращает данные в JSON-формате
+- Автоматически сохраняет результаты в `data/raw/*.ndjson`
+- Автоматически выполняет `dvc add data` после каждого запуска
 
-**Три типа артефактов:**
+## Актуальная структура
 
-- 🏷️ **Структурированные данные**: цена, площадь, этаж, координаты
-- 📝 **Текстовые описания**: свободный текст от авторов объявлений
-- 🖼️ **Изображения**: фото интерьеров и планировок квартир
-
-
-## 🏗️ Архитектура проекта
-
-```
+```text
 real-estate-listing-analyzer/
-├── src/                   # Скрипты скрейпинга и обработки
-│   ├── scraper.py         # BeautifulSoup парсер Циан
-│   ├── process.py         # Парсинг → pandas DataFrame
-│   └── download_images.py # Скачивание фото
-├── data/                  # DVC управляемые данные
-│   ├── raw/              # Сырые JSON
-│   ├── structured/       # listings.parquet
-│   └── images/           # Фото квартир
-├── dvc.yaml              # ML пайплайн
-├── .dvc/                 # DVC метафайлы (git)
-└── params.yaml           # Настройки
+├── cian_scraper.py
+├── main.py
+├── data.dvc
+├── data/
+│   └── raw/
+├── requirements.txt
+└── pyproject.toml
 ```
 
+## Требования
 
-## 🚀 Быстрый старт
+- Python 3.11+
+- Git
+- DVC (для хранения и пуша данных в Synology NAS DS218 по SSH)
 
-### 1. Клонирование и окружение
+## Быстрый старт (Windows PowerShell)
 
 ```powershell
-git clone https://github.com/maxim-perchikov/real-estate-listing-analyzer.git
-cd real-estate-listing-analyzer
+cd C:\Users\maxim\OneDrive\Documents\GitHub\real-estate-listing-analyzer
 
-# Создай виртуальное окружение
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 
-# Установи зависимости
+python -m pip install --upgrade pip
 pip install -r requirements.txt
+pip install "dvc[ssh]"
 ```
 
+## Точка входа
 
-### 2. Инициализация DVC + NAS
+- Основная точка входа: `main.py`
+- Запуск:
 
 ```powershell
-# Инициализация DVC
-dvc init
+python main.py --help
+```
 
-# Подключение Synology NAS (SSH)
-dvc remote add -d nas-ssh ssh://Maxim@91.77.167.XXX/home/Maxim/dvc-data
-dvc remote modify nas-ssh keyfile "$env:USERPROFILE\.ssh\dvc_synology"
+## Режимы запуска
+
+### 1) Один URL
+
+```powershell
+python main.py --url "https://www.cian.ru/sale/flat/292125772/"
+```
+
+### 2) Пакет URL-ов
+
+```powershell
+python main.py --urls-file "C:\path\to\urls.txt"
+```
+
+С NDJSON-выводом в консоль:
+
+```powershell
+python main.py --urls-file "C:\path\to\urls.txt" --ndjson
+```
+
+### 3) Локальный HTML
+
+```powershell
+python main.py --html-file "C:\path\to\listing.html"
+```
+
+## Что сохраняется в data
+
+После каждого запуска создается файл в `data/raw`:
+
+- `cian_single_<UTC_TIMESTAMP>.ndjson`
+- `cian_batch_<UTC_TIMESTAMP>.ndjson`
+- `cian_html_<UTC_TIMESTAMP>.ndjson`
+
+Каждая строка NDJSON — отдельный сериализованный объект объявления.
+
+## Интеграция с DVC
+
+Встроенный пайплайн в `main.py`:
+
+1. Скрапинг данных
+2. Сериализация в `data/raw`
+3. `dvc add data`
+
+Если DVC не установлен или не найден, скрипт вернет понятную ошибку.
+Удаленное DVC-хранилище настроено на Synology NAS DS218 по SSH.
+
+## Настройка DVC remote (SSH)
+
+```powershell
+dvc remote add -d storage ssh://<USER>@<HOST>/<ABSOLUTE_PATH_ON_SERVER>
+dvc remote modify storage keyfile "$env:USERPROFILE\.ssh\id_rsa"
+dvc remote list --verbose
+```
+
+Пример для Synology NAS DS218:
+
+```powershell
+dvc remote add -d storage ssh://<NAS_USER>@<NAS_HOST>/volume1/dvc/real-estate-listing-analyzer
+dvc remote modify storage keyfile "$env:USERPROFILE\.ssh\id_rsa"
+```
+
+Проверка синхронизации:
+
+```powershell
+dvc status -c
 dvc push
 ```
 
-
-### 3. Запуск пайплайна
-
-```powershell
-# Полный пайплайн (скрейпинг → обработка → фото)
-dvc repro
-
-# Синхронизация с NAS
-dvc push -j 1
-```
-
-
-## 📊 Результат пайплайна
-
-| Артефакт | Путь | Описание |
-| :-- | :-- | :-- |
-| `listings.parquet` | `data/structured/` | 1000+ объявлений с ценой, площадью, этажом |
-| `descriptions.json` | `data/raw/` | Полные тексты объявлений |
-| `images/` | `data/images/` | Фото интерьеров (jpg/png) |
-
-## 🔧 Настройка с нуля
-
-### Требования:
-
-```
-Python 3.10+
-Git 2.40+
-DVC 3.5+
-Synology NAS (DSM 7+ с SSH/SFTP)
-```
-
-
-### Зависимости (`requirements.txt`):
-
-```txt
-requests==2.31.0
-beautifulsoup4==4.12.2
-lxml==4.9.3
-pandas==2.1.4
-pyarrow==14.0.1
-tqdm==4.66.1
-```
-
-
-## 🌐 Доступ с других устройств
-
-1. **DDNS**: `maxim-nas.synology.me`
-2. **Скопируй приватный ключ**: `C:\Users\maxim\.ssh\dvc_synology`
-3. **Подключись**: `dvc remote add nas-ssh ssh://Maxim@maxim-nas.synology.me/...`
-
-## 📈 Пример данных
-
-```bash
-# Структурированные данные
-$ dvc desc data/structured/listings.parquet
-size: 2.4MB, 1250 строк
-
-# Схема колонок:
-listing_id, price_rub, total_area, floor, district, scraped_at
-12345678, 12500000, 56.2, 5/12, Хамовники, 2026-03-18
-```
-
-
-## 🔄 Полезные команды DVC
+## Типовой рабочий цикл
 
 ```powershell
-dvc pull          # Скачать данные с NAS
-dvc push -j 1     # Загрузить на NAS
-dvc dag           # Показать пайплайн
-dvc metrics show  # Метрики качества
-dvc status        # Статус изменений
+python main.py --urls-file "C:\path\to\urls.txt" --ndjson
+git add data.dvc
+git commit -m "Update scraped data snapshot"
+dvc push
 ```
 
+## Легальность
 
-## 🛡️ Лицензия и легальность
-
-⚠️ **Скрейпинг Циан.ru только для образовательных целей!**
-
-- Соблюдай `robots.txt`
-- Добавляй задержки между запросами
-- Не перегружай сервер
-
-**Лицензия проекта**: MIT
-
-***
-
-**Скрейпер → DVC → Synology NAS → Анализ недвижимости!** 🏠→📊→☁️
-
-*Автор: Maxim Perchikov | Data Science Student | Moscow, 2026*
-
+Скрейпинг выполняй с учетом правил площадки и действующего законодательства.
