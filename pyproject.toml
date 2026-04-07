@@ -7,5 +7,8 @@ requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4>=4.12.0",
     "dvc[ssh]>=3.66.1",
+    "pandas>=2.2.0",
+    "pandera>=0.20.4",
+    "pyarrow>=16.0.0",
     "requests>=2.31.0",
 ]

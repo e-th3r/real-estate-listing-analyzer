@@ -1,15 +1,17 @@
 # Real Estate Listing Analyzer
 
-Скрипт для анализа объявлений Циан с автоматической сериализацией результатов в `data/raw` и трекингом данных через DVC.
+Проект для сбора объявлений Циан, валидации данных через Pandera, очистки аномалий и сохранения чистого датасета в Parquet с трекингом через DVC.
+
 Для хранения и синхронизации DVC-данных используется Synology NAS DS218 по SSH.
 
-## Что делает проект
+## Что умеет проект
 
-- Получает данные объявления по URL Циан через API-скрейпер
-- Поддерживает разбор сохраненного HTML-файла
-- Возвращает данные в JSON-формате
-- Автоматически сохраняет результаты в `data/raw/*.ndjson`
-- Автоматически выполняет `dvc add data` после каждого запуска
+- Скрейпинг объявления Циан по URL
+- Разбор локального HTML объявления
+- Автосохранение сырых записей в `data/raw/*.ndjson`
+- Валидация схемы и правил качества через Pandera
+- Очистка датасета от аномалий и экспорт в `.parquet`
+- Трекинг данных в DVC (`dvc add data`)
 
 ## Актуальная структура
 
@@ -17,9 +19,12 @@
 real-estate-listing-analyzer/
 ├── cian_scraper.py
 ├── main.py
+├── dataset_schema.py
+├── build_clean_dataset.py
 ├── data.dvc
 ├── data/
-│   └── raw/
+│   ├── raw/
+│   └── structured/
 ├── requirements.txt
 └── pyproject.toml
 ```
@@ -28,9 +33,10 @@ real-estate-listing-analyzer/
 
 - Python 3.11+
 - Git
-- DVC (для хранения и пуша данных в Synology NAS DS218 по SSH)
+- DVC (`dvc[ssh]`)
+- Synology NAS DS218 c SSH-доступом
 
-## Быстрый старт (Windows PowerShell)
+## Установка (Windows PowerShell)
 
 ```powershell
 cd C:\Users\maxim\OneDrive\Documents\GitHub\real-estate-listing-analyzer
@@ -43,93 +49,114 @@ pip install -r requirements.txt
 pip install "dvc[ssh]"
 ```
 
-## Точка входа
+## 1. Сбор сырых данных
 
-- Основная точка входа: `main.py`
-- Запуск:
+Точка входа: `main.py`
 
 ```powershell
 python main.py --help
 ```
 
-## Режимы запуска
-
-### 1) Один URL
+Режимы запуска:
 
 ```powershell
-python main.py --url "https://www.cian.ru/sale/flat/292125772/"
-```
+# Один URL
+python main.py --url "https://www.cian.ru/sale/flat/328442756/"
 
-### 2) Пакет URL-ов
-
-```powershell
+# Batch из файла URL
 python main.py --urls-file "C:\path\to\urls.txt"
-```
-
-С NDJSON-выводом в консоль:
-
-```powershell
 python main.py --urls-file "C:\path\to\urls.txt" --ndjson
-```
 
-### 3) Локальный HTML
-
-```powershell
+# Разбор локального HTML
 python main.py --html-file "C:\path\to\listing.html"
 ```
 
-## Что сохраняется в data
+После запуска `main.py`:
 
-После каждого запуска создается файл в `data/raw`:
+- Проверяет данные по Pandera-схеме (`dataset_schema.py`)
+- Сохраняет сырые данные в `data/raw/*.ndjson`
+- Выполняет `dvc add data`
 
-- `cian_single_<UTC_TIMESTAMP>.ndjson`
-- `cian_batch_<UTC_TIMESTAMP>.ndjson`
-- `cian_html_<UTC_TIMESTAMP>.ndjson`
+## 2. Очистка и сбор финального датасета
 
-Каждая строка NDJSON — отдельный сериализованный объект объявления.
-
-## Интеграция с DVC
-
-Встроенный пайплайн в `main.py`:
-
-1. Скрапинг данных
-2. Сериализация в `data/raw`
-3. `dvc add data`
-
-Если DVC не установлен или не найден, скрипт вернет понятную ошибку.
-Удаленное DVC-хранилище настроено на Synology NAS DS218 по SSH.
-
-## Настройка DVC remote (SSH)
+Скрипт: `build_clean_dataset.py`
 
 ```powershell
-dvc remote add -d storage ssh://<USER>@<HOST>/<ABSOLUTE_PATH_ON_SERVER>
-dvc remote modify storage keyfile "$env:USERPROFILE\.ssh\id_rsa"
-dvc remote list --verbose
+python build_clean_dataset.py
 ```
 
-Пример для Synology NAS DS218:
+По умолчанию:
+
+- вход: `data/raw/*.ndjson`
+- чистый датасет: `data/structured/listings_clean.parquet`
+- аномалии: `data/structured/listings_anomalies.json`
+
+Кастомные пути:
+
+```powershell
+python build_clean_dataset.py `
+  --input-dir data/raw `
+  --output data/structured/listings_clean.parquet `
+  --anomalies-output data/structured/listings_anomalies.json
+```
+
+## Схема Pandera и правила качества
+
+Схема описана в `dataset_schema.py`.
+
+Проверяются поля:
+
+- `url`
+- `price_rub`
+- `total_area_m2`
+- `floor`
+- `floors_total`
+- `latitude`
+- `longitude`
+- `description`
+
+Жесткие правила:
+
+- URL объявления Циан, нормализуется (убираются query/fragment)
+- Диапазоны цены/площади/этажей/координат
+- `floor <= floors_total`
+- Минимальная/максимальная длина описания
+
+Поведение:
+
+- В `main.py` нарушение схемы прерывает сохранение в DVC
+- В `build_clean_dataset.py` строки, не прошедшие схему, отбрасываются в файл аномалий
+
+## Настройка DVC remote (Synology DS218 по SSH)
 
 ```powershell
 dvc remote add -d storage ssh://<NAS_USER>@<NAS_HOST>/volume1/dvc/real-estate-listing-analyzer
 dvc remote modify storage keyfile "$env:USERPROFILE\.ssh\id_rsa"
+dvc remote list --verbose
 ```
 
-Проверка синхронизации:
+Проверка статуса и push:
 
 ```powershell
 dvc status -c
 dvc push
 ```
 
-## Типовой рабочий цикл
+## Типовой workflow
 
 ```powershell
+# 1) Собрать сырые данные
 python main.py --urls-file "C:\path\to\urls.txt" --ndjson
+
+# 2) Собрать чистый parquet
+python build_clean_dataset.py
+
+# 3) Зафиксировать и отправить
 git add data.dvc
-git commit -m "Update scraped data snapshot"
+git commit -m "Update raw and cleaned datasets"
 dvc push
 ```
 
 ## Легальность
 
-Скрейпинг выполняй с учетом правил площадки и действующего законодательства.
+Используй скрейпинг в рамках правил площадки и действующего законодательства.

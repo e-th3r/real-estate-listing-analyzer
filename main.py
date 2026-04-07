@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 from cian_scraper import parse_cian_listing, scrape_cian_listing_via_cianpython
+from dataset_schema import validate_scraped_records
 
 
 def analyze_cian_listing(url: str) -> Dict[str, Any]:
@@ -50,6 +51,8 @@ def analyze_many(urls: Iterable[str], *, max_workers: int = 8) -> List[Tuple[str
 
 
 def _serialize_to_dvc(records: List[Dict[str, Any]], *, source: str) -> Path:
+    validate_scraped_records(records)
+
     root = Path(__file__).resolve().parent
     raw_dir = root / "data" / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
