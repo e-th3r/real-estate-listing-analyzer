@@ -1,6 +1,8 @@
 import json
+import random
 import re
 import sys
+import time
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
@@ -37,6 +39,37 @@ HEADERS = {
 }
 
 CIAN_SEARCH_API_URL = "https://api.cian.ru/search-offers/v2/search-offers-desktop/"
+
+
+def _post_json_with_retry(
+    session: requests.Session,
+    url: str,
+    *,
+    json_payload: Dict[str, Any],
+    timeout: int,
+    max_attempts: int = 4,
+) -> requests.Response:
+    last_response: Optional[requests.Response] = None
+
+    for attempt in range(1, max_attempts + 1):
+        response = session.post(url, json=json_payload, timeout=timeout)
+        last_response = response
+
+        if response.status_code != 429:
+            response.raise_for_status()
+            return response
+
+        retry_after = response.headers.get("Retry-After")
+        if retry_after and retry_after.isdigit():
+            sleep_s = float(retry_after)
+        else:
+            sleep_s = min(20.0, (2 ** (attempt - 1)) + random.uniform(0.3, 1.2))
+
+        time.sleep(sleep_s)
+
+    assert last_response is not None
+    last_response.raise_for_status()
+    return last_response
 
 
 def fetch_cian_listing(url: str, *, timeout: int = 15) -> str:
@@ -705,8 +738,12 @@ def _request_offer_candidates(listing_id: int, *, timeout: int) -> List[Dict[str
                         **id_filter,
                     }
                 }
-                response = session.post(CIAN_SEARCH_API_URL, json=payload, timeout=timeout)
-                response.raise_for_status()
+                response = _post_json_with_retry(
+                    session,
+                    CIAN_SEARCH_API_URL,
+                    json_payload=payload,
+                    timeout=timeout,
+                )
                 content_type = response.headers.get("Content-Type", "")
                 if "application/json" not in content_type.lower():
                     continue
@@ -714,6 +751,7 @@ def _request_offer_candidates(listing_id: int, *, timeout: int) -> List[Dict[str
                 offers = _extract_offer_list(parsed)
                 if offers:
                     offers_found.extend(offers)
+                    return offers_found
     return offers_found
 
 

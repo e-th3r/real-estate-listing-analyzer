@@ -1,6 +1,7 @@
 import argparse
 import json
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,9 +51,12 @@ def analyze_many(urls: Iterable[str], *, max_workers: int = 8) -> List[Tuple[str
     return results
 
 
-def _serialize_to_dvc(records: List[Dict[str, Any]], *, source: str) -> Path:
-    validate_scraped_records(records)
-
+def write_records_and_dvc_track(records: List[Dict[str, Any]], *, source: str) -> Path:
+    """
+    Пишет NDJSON в data/raw и запускает `dvc add data`. Без Pandera-валидации —
+    используется auto-режимом для массового инжеста (фильтрация строк происходит
+    в build_clean_dataset.py).
+    """
     root = Path(__file__).resolve().parent
     raw_dir = root / "data" / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -64,7 +68,11 @@ def _serialize_to_dvc(records: List[Dict[str, Any]], *, source: str) -> Path:
             f.write(json.dumps(record, ensure_ascii=False))
             f.write("\n")
 
-    dvc_commands = [["dvc", "add", "data"], ["python", "-m", "dvc", "add", "data"]]
+    dvc_commands = [
+        ["dvc", "add", "data"],
+        [sys.executable, "-m", "dvc", "add", "data"],
+        ["uv", "run", "python", "-m", "dvc", "add", "data"],
+    ]
     last_result: subprocess.CompletedProcess[str] | None = None
     for cmd in dvc_commands:
         try:
@@ -89,6 +97,11 @@ def _serialize_to_dvc(records: List[Dict[str, Any]], *, source: str) -> Path:
         )
 
     return output_path
+
+
+def _serialize_to_dvc(records: List[Dict[str, Any]], *, source: str) -> Path:
+    validate_scraped_records(records)
+    return write_records_and_dvc_track(records, source=source)
 
 
 def main() -> None:

@@ -1,5 +1,6 @@
 [core]
     remote = nas-ssh
+    site_cache_dir = .dvc/tmp/site-cache
 ['remote "nas-ssh"']
     url = ssh://Maxim@91.77.167.67/Dvc-data
     keyfile = C:\Users\maxim\.ssh\dvc_synology

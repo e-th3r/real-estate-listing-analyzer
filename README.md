@@ -19,6 +19,7 @@
 real-estate-listing-analyzer/
 ├── cian_scraper.py
 ├── main.py
+├── auto_parser.py
 ├── dataset_schema.py
 ├── build_clean_dataset.py
 ├── data.dvc
@@ -76,6 +77,28 @@ python main.py --html-file "C:\path\to\listing.html"
 - Проверяет данные по Pandera-схеме (`dataset_schema.py`)
 - Сохраняет сырые данные в `data/raw/*.ndjson`
 - Выполняет `dvc add data`
+
+## 1b. Авто-сбор по городу (без ручного списка URL)
+
+Скрипт `auto_parser.py` автоматически находит объявления через
+[NurjahonErgashevMe/cianparser](https://github.com/NurjahonErgashevMe/cianparser)
+(итерация по страницам поиска Циана), а затем обогащает каждое объявление
+через Cian API (координаты, описание, этаж и т.п.).
+
+```powershell
+# Москва, продажа, 1-2-3 комнаты, первые 3 страницы поиска
+python auto_parser.py --location "Москва" --deal-type sale --rooms "1,2,3" --start-page 1 --end-page 3
+
+# Только собрать и напечатать URL, без обогащения и DVC
+python auto_parser.py --location "Санкт-Петербург" --rooms all --end-page 5 --dry-run
+```
+
+Ключевое отличие от `main.py`:
+
+- Pandera-валидация **не применяется на входе**: массовый сбор неизбежно
+  содержит аномалии, и их фильтрация делегирована `build_clean_dataset.py`.
+- `cianparser` не возвращает координаты, поэтому обогащение через Cian API
+  обязательно — без координат строки всё равно будут отсеяны на шаге 2.
 
 ## 2. Очистка и сбор финального датасета
 
@@ -145,8 +168,10 @@ dvc push
 ## Типовой workflow
 
 ```powershell
-# 1) Собрать сырые данные
+# 1) Собрать сырые данные — либо вручную по списку URL,
 python main.py --urls-file "C:\path\to\urls.txt" --ndjson
+#    либо в авто-режиме по городу
+python auto_parser.py --location "Москва" --end-page 5
 
 # 2) Собрать чистый parquet
 python build_clean_dataset.py
