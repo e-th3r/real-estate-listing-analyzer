@@ -69,6 +69,7 @@ def _target_from_html_fallback(url: str) -> TargetListing:
         total_area_m2=structured.get("total_area_m2"),
         floor=structured.get("floor"),
         floors_total=structured.get("floors_total"),
+        images=list(data.get("images") or []),
     )
 
 
@@ -104,6 +105,7 @@ def _alt_to_dict(doc, score: float) -> Dict[str, Any]:
         "floors_total": md.get("floors_total"),
         "latitude": md.get("latitude"),
         "longitude": md.get("longitude"),
+        "image_url": md.get("image_url"),
         "distance": float(score),
         "snippet": snippet,
     }
@@ -119,6 +121,7 @@ def _target_to_dict(t: TargetListing, source: str) -> Dict[str, Any]:
         "floor": t.floor,
         "floors_total": t.floors_total,
         "description": t.description,
+        "images": list(t.images or []),
         "source": source,
     }
 
@@ -237,6 +240,36 @@ def stats() -> Dict[str, Any]:
     }
 
 
+@app.get("/api/images")
+def images(url: str) -> Dict[str, Any]:
+    """Lazy fetch of listing photos. Used by the UI to backfill the gallery
+    when /api/analyze hit the dataset path (no images stored in parquet)."""
+    try:
+        norm_url = _normalize_cian_url(url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Невалидный URL: {exc}") from exc
+
+    imgs: List[str] = []
+    try:
+        from cian_scraper import scrape_cian_listing_via_cianpython
+
+        data = scrape_cian_listing_via_cianpython(norm_url)
+        imgs = list(data.get("images") or [])
+    except Exception as api_err:
+        logger.info("Cian API images failed (%s); trying HTML", api_err)
+        try:
+            from cian_scraper import fetch_cian_listing, parse_cian_listing
+
+            html = fetch_cian_listing(norm_url)
+            data = parse_cian_listing(html)
+            imgs = list(data.get("images") or [])
+        except Exception as html_err:
+            logger.warning("HTML images also failed: %s", html_err)
+            imgs = []
+
+    return {"url": norm_url, "images": imgs}
+
+
 @app.get("/api/health")
 def health() -> Dict[str, Any]:
     return {
@@ -252,7 +285,10 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    return FileResponse(
+        str(STATIC_DIR / "index.html"),
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
 
 
 if __name__ == "__main__":

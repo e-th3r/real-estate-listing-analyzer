@@ -663,7 +663,12 @@ def _extract_images_from_json(data: Any) -> List[str]:
         if not isinstance(value, str):
             continue
         lower = value.lower()
+        if not lower.startswith(("http://", "https://")):
+            continue
         if not any(ext in lower for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+            continue
+        # Skip small/icon assets and known non-photo paths.
+        if any(stop in lower for stop in ("/icons/", "/logo", "favicon", "sprite", "avatar")):
             continue
         if value in seen:
             continue

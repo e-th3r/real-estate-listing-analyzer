@@ -61,6 +61,7 @@ def _target_from_scrape(url: str) -> TargetListing:
         total_area_m2=structured.get("total_area_m2"),
         floor=structured.get("floor"),
         floors_total=structured.get("floors_total"),
+        images=list(data.get("images") or []),
     )
 
 

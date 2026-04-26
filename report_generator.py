@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 from langchain_chroma import Chroma
@@ -58,6 +58,7 @@ class TargetListing:
     total_area_m2: Optional[float] = None
     floor: Optional[int] = None
     floors_total: Optional[int] = None
+    images: List[str] = field(default_factory=list)
 
     @property
     def price_per_m2(self) -> Optional[float]:

@@ -73,6 +73,11 @@ _DATASET_SCHEMA = pa.DataFrameSchema(
                 pa.Check.str_length(min_value=20, max_value=50_000),
             ],
         ),
+        "image_url": pa.Column(
+            str,
+            nullable=True,
+            required=False,
+        ),
     },
     checks=[
         pa.Check(
@@ -94,6 +99,7 @@ DATASET_COLUMNS = [
     "latitude",
     "longitude",
     "description",
+    "image_url",
 ]
 
 
@@ -105,6 +111,8 @@ def records_to_frame(records: List[Dict[str, Any]]) -> pd.DataFrame:
         structured = record.get("structured")
         if not isinstance(structured, dict):
             raise ValueError("В успешной записи отсутствует объект `structured`.")
+        images = record.get("images") or []
+        first_image = images[0] if isinstance(images, list) and images else None
         rows.append(
             {
                 "url": record.get("url"),
@@ -115,6 +123,7 @@ def records_to_frame(records: List[Dict[str, Any]]) -> pd.DataFrame:
                 "latitude": structured.get("latitude"),
                 "longitude": structured.get("longitude"),
                 "description": record.get("description"),
+                "image_url": first_image,
             }
         )
     frame = pd.DataFrame(rows)
@@ -137,6 +146,10 @@ def coerce_dataset_types(frame: pd.DataFrame) -> pd.DataFrame:
         .str.replace(r"\s+", " ", regex=True)
         .str.strip()
     )
+    if "image_url" in result.columns:
+        result["image_url"] = result["image_url"].astype("string")
+    else:
+        result["image_url"] = pd.Series([pd.NA] * len(result), dtype="string")
 
     numeric_columns = [
         "price_rub",
