@@ -200,17 +200,3 @@ def filter_valid_rows(frame: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     return clean_df, anomalies_df
 
 
-def validate_scraped_records(records: List[Dict[str, Any]]) -> None:
-    frame = records_to_frame(records)
-    if frame.empty:
-        return
-    frame = coerce_dataset_types(frame)
-    try:
-        _DATASET_SCHEMA.validate(frame, lazy=True)
-    except SchemaErrors as exc:
-        failures = exc.failure_cases
-        preview = failures.head(10).to_string(index=False)
-        raise ValueError(
-            "Нарушены правила качества датасета (Pandera). "
-            f"Первые ошибки:\n{preview}"
-        ) from exc
