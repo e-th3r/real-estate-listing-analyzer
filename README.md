@@ -1,31 +1,49 @@
-﻿# Real Estate Listing Analyzer
+# Real Estate Listing Analyzer
 
-Проект для сбора объявлений Циан, валидации данных через Pandera, очистки аномалий и сохранения чистого датасета в Parquet с трекингом через DVC.
+Проект для сбора объявлений Циан, валидации данных через Pandera, очистки
+аномалий, индексации в локальной векторной базе (Chroma + multilingual
+sentence-transformers) и генерации LLM-отчёта о выгодности конкретного
+объявления на фоне похожих. Чистый датасет хранится в Parquet и трекается
+через DVC, а сверху лежит тонкий FastAPI-веб-интерфейс.
 
 Для хранения и синхронизации DVC-данных используется Synology NAS DS218 по SSH.
 
 ## Что умеет проект
 
-- Скрейпинг объявления Циан по URL
+- Скрейпинг объявления Циан по URL (Cian API + HTML fallback)
+- Авто-сбор по городу через `cianparser` + обогащение через Cian API
 - Разбор локального HTML объявления
 - Автосохранение сырых записей в `data/raw/*.ndjson`
 - Валидация схемы и правил качества через Pandera
 - Очистка датасета от аномалий и экспорт в `.parquet`
+- Построение векторного индекса Chroma поверх чистого parquet
+- Семантический поиск похожих объявлений
+- LLM-отчёт «выгодная / средняя / переоценённая сделка» с разбором плюсов и минусов
+- FastAPI-веб-приложение со статистикой и анализом по URL
 - Трекинг данных в DVC (`dvc add data`)
 
 ## Актуальная структура
 
 ```text
 real-estate-listing-analyzer/
-├── cian_scraper.py
-├── main.py
-├── auto_parser.py
-├── dataset_schema.py
-├── build_clean_dataset.py
+├── cian_scraper.py            # Cian API + HTML парсер
+├── main.py                    # ручной ингест по URL (строгая валидация)
+├── auto_parser.py             # авто-ингест по городу (без валидации)
+├── dataset_schema.py          # Pandera-схема и правила качества
+├── build_clean_dataset.py     # NDJSON → чистый parquet + аномалии
+├── vector_store.py            # Chroma + HuggingFaceEmbeddings
+├── build_vector_store.py      # parquet → Chroma persistent store + dvc add
+├── analyze_listing.py         # CLI: похожие квартиры + LLM-отчёт
+├── report_generator.py        # промпты и LangChain pipeline для отчёта
+├── webapp/
+│   ├── server.py              # FastAPI: /api/stats, /api/analyze, /api/health
+│   ├── index.html             # одностраничный UI
+│   └── README.md
 ├── data.dvc
 ├── data/
-│   ├── raw/
-│   └── structured/
+│   ├── raw/                   # NDJSON-инжесты
+│   ├── structured/            # listings_clean.parquet + listings_anomalies.json
+│   └── vector_store/          # Chroma persistent storage
 ├── requirements.txt
 └── pyproject.toml
 ```
@@ -36,6 +54,7 @@ real-estate-listing-analyzer/
 - Git
 - DVC (`dvc[ssh]`)
 - Synology NAS DS218 c SSH-доступом
+- Доступ к LLM-эндпоинту (LM Studio / Ollama / OpenAI-совместимый) — только для отчётов
 
 ## Установка (Windows PowerShell)
 
@@ -48,6 +67,12 @@ python -m venv .venv
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install "dvc[ssh]"
+```
+
+Альтернатива через `uv`:
+
+```powershell
+uv sync
 ```
 
 ## 1. Сбор сырых данных
@@ -123,6 +148,87 @@ python build_clean_dataset.py `
   --anomalies-output data/structured/listings_anomalies.json
 ```
 
+## 3. Построение векторного индекса
+
+Скрипт: `build_vector_store.py`. Берёт чистый parquet, считает эмбеддинги
+описаний моделью `paraphrase-multilingual-MiniLM-L12-v2` (по умолчанию,
+работает на CPU) и кладёт коллекцию `cian_listings` в Chroma persistent
+storage.
+
+```powershell
+# Полная пересборка из data/structured/listings_clean.parquet в data/vector_store
+python build_vector_store.py
+
+# Без вызова `dvc add data` (например, для локальных экспериментов)
+python build_vector_store.py --no-dvc
+
+# Кастомная модель / GPU
+python build_vector_store.py --model intfloat/multilingual-e5-base --device cuda
+```
+
+Хранилище **всегда пересоздаётся**: при разной размерности эмбеддингов схема
+Chroma несовместима, поэтому скрипт делает `rmtree(persist_dir)` перед
+сборкой.
+
+## 4. Анализ конкретного объявления (CLI)
+
+Скрипт: `analyze_listing.py`. Тянет проверяемое объявление либо из parquet
+по URL, либо скрейпит онлайн, ищет топ-K похожих в Chroma и (опционально)
+просит LLM сгенерировать структурированный отчёт.
+
+```powershell
+# По URL: сначала проверяем, есть ли квартира в датасете; если нет — скрейпим
+python analyze_listing.py --url "https://www.cian.ru/sale/flat/328442756/"
+
+# Только похожие, без LLM
+python analyze_listing.py --url "https://www.cian.ru/sale/flat/328442756/" --no-report
+
+# Запрос свободным текстом (без скрейпинга)
+python analyze_listing.py --text "1-к квартира 38 м² у метро Сокол, 7/12, 14 млн"
+python analyze_listing.py --text-file "C:\path\to\listing.txt"
+```
+
+Конфигурация LLM — через флаги (`--llm-model`, `--llm-base-url`,
+`--llm-api-key`, `--llm-temperature`) или переменные окружения
+`LISTING_LLM_*` / `OPENAI_API_KEY` (см. секцию ниже).
+
+## 5. Веб-интерфейс
+
+FastAPI-приложение в `webapp/`. Поднимает три эндпоинта поверх тех же
+функций, что и CLI (`_target_from_dataset`, `_target_from_scrape`,
+`build_default_llm`).
+
+```powershell
+# из корня проекта
+python -m uvicorn webapp.server:app --host 127.0.0.1 --port 8000
+# или напрямую
+python webapp/server.py
+```
+
+Открыть: <http://127.0.0.1:8000/>
+
+- `GET /` — статический `index.html`.
+- `GET /api/stats` — счётчики по `listings_clean.parquet` и
+  `listings_anomalies.json` (медиана ₽/м² и цены, всего/чистых/аномалий).
+- `POST /api/analyze` — `{ "url", "k", "report", "no_scrape" }`. Сначала
+  ищет URL в parquet, при отсутствии скрейпит через Cian API
+  (с HTML-fallback). Если `report: true` — собирает LLM-отчёт.
+- `GET /api/health` — есть ли parquet и vector store на диске.
+
+Без parquet `/api/stats` отдаёт нули; без vector store `/api/analyze` отвечает 503.
+
+### LLM-конфигурация
+
+`report_generator.build_default_llm` читает переменные окружения:
+
+```bash
+export LISTING_LLM_BASE_URL="http://localhost:1234/v1"   # LM Studio / Ollama
+export LISTING_LLM_MODEL="qwen2.5-7b-instruct"
+export LISTING_LLM_API_KEY="local"
+```
+
+Для облачного OpenAI достаточно `OPENAI_API_KEY` + `LISTING_LLM_MODEL=gpt-4o-mini`.
+
 ## Схема Pandera и правила качества
 
 Схема описана в `dataset_schema.py`.
@@ -176,12 +282,20 @@ python auto_parser.py --location "Москва" --end-page 5
 # 2) Собрать чистый parquet
 python build_clean_dataset.py
 
-# 3) Зафиксировать и отправить
+# 3) Перестроить векторный индекс
+python build_vector_store.py
+
+# 4) Поднять веб-интерфейс или запустить CLI-анализ
+python -m uvicorn webapp.server:app --port 8000
+# либо
+python analyze_listing.py --url "https://www.cian.ru/sale/flat/328442756/"
+
+# 5) Зафиксировать и отправить
 git add data.dvc
-git commit -m "Update raw and cleaned datasets"
+git commit -m "Update raw, cleaned and vector datasets"
 dvc push
 ```
 
 ## Легальность
 
-Используй скрейпинг в рамках правил площадки и действующего законодательства.
+Cкрейпинг в рамках правил площадки и действующего законодательства.
