@@ -203,3 +203,99 @@ def search_alternatives_with_scores(
         if len(deduped) >= k:
             break
     return deduped[:k]
+
+
+def _metadata_distance(target: dict, candidate: dict) -> Optional[float]:
+    """Среднее по компонентам расстояние [0, 1] между числовыми метаданными.
+
+    Возвращает None, если ни одной общей числовой характеристики нет —
+    тогда вызывающий код должен откатиться на чисто описательный поиск.
+    """
+    components: List[float] = []
+
+    t_ppm = target.get("price_per_m2")
+    c_ppm = candidate.get("price_per_m2")
+    if t_ppm and c_ppm:
+        components.append(min(abs(float(t_ppm) - float(c_ppm)) / float(t_ppm), 1.0))
+
+    t_area = target.get("total_area_m2")
+    c_area = candidate.get("total_area_m2")
+    if t_area and c_area:
+        components.append(min(abs(float(t_area) - float(c_area)) / float(t_area), 1.0))
+
+    t_ft = target.get("floors_total")
+    c_ft = candidate.get("floors_total")
+    if t_ft and c_ft:
+        denom = max(float(t_ft), float(c_ft))
+        components.append(min(abs(float(t_ft) - float(c_ft)) / denom, 1.0))
+
+    t_f = target.get("floor")
+    c_f = candidate.get("floor")
+    if t_f and c_f and t_ft and c_ft:
+        # Сравниваем относительное положение этажа (низ / середина / верх).
+        components.append(min(abs(float(t_f) / float(t_ft) - float(c_f) / float(c_ft)), 1.0))
+
+    if not components:
+        return None
+    return sum(components) / len(components)
+
+
+def search_alternatives_metadata_first(
+    store: Chroma,
+    *,
+    query: str,
+    target_metadata: dict,
+    k: int = 5,
+    exclude_ids: Optional[Iterable[str]] = None,
+    description_weight: float = 0.25,
+    fetch_k: int = 500,
+) -> List[tuple[Document, float]]:
+    """Поиск соседей, где метаданные — основной критерий, описание — вторичный.
+
+    description_weight ∈ [0, 1] — доля семантического расстояния в финальной
+    оценке. По умолчанию 0.25 (метаданные весят 0.75). Возвращаются пары
+    (Document, combined_distance), где меньше — ближе.
+    """
+    has_meta = any(
+        target_metadata.get(field) is not None
+        for field in ("price_per_m2", "total_area_m2", "floor", "floors_total")
+    )
+    if not has_meta:
+        return search_alternatives_with_scores(
+            store, query=query, k=k, exclude_ids=exclude_ids
+        )
+
+    excluded = set(exclude_ids or [])
+    pairs = store.similarity_search_with_score(query, k=fetch_k)
+    if excluded:
+        pairs = [(d, s) for d, s in pairs if d.metadata.get("listing_id") not in excluded]
+    if not pairs:
+        return []
+
+    desc_scores = [s for _, s in pairs]
+    s_min = min(desc_scores)
+    s_range = (max(desc_scores) - s_min) or 1.0
+
+    rescored: List[tuple[Document, float]] = []
+    for doc, desc_score in pairs:
+        meta_d = _metadata_distance(target_metadata, doc.metadata or {})
+        desc_norm = (desc_score - s_min) / s_range
+        if meta_d is None:
+            combined = desc_norm
+        else:
+            combined = (1.0 - description_weight) * meta_d + description_weight * desc_norm
+        rescored.append((doc, combined))
+
+    rescored.sort(key=lambda pair: pair[1])
+
+    deduped: List[tuple[Document, float]] = []
+    seen_signatures: set[tuple] = set()
+    for doc, combined in rescored:
+        signature = _result_signature(doc)
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        deduped.append((doc, combined))
+        if len(deduped) >= k:
+            break
+    return deduped[:k]

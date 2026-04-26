@@ -15,7 +15,7 @@ from vector_store import (
     DEFAULT_VECTOR_STORE_DIR,
     listing_id_from_url,
     load_vector_store,
-    search_alternatives_with_scores,
+    search_alternatives_metadata_first,
 )
 
 
@@ -38,6 +38,8 @@ def _target_from_dataset(parquet_path: Path, url: str) -> Optional[TargetListing
         total_area_m2=float(row["total_area_m2"]),
         floor=int(row["floor"]),
         floors_total=int(row["floors_total"]),
+        latitude=float(row["latitude"]) if "latitude" in row.index else None,
+        longitude=float(row["longitude"]) if "longitude" in row.index else None,
     )
 
 
@@ -61,6 +63,8 @@ def _target_from_scrape(url: str) -> TargetListing:
         total_area_m2=structured.get("total_area_m2"),
         floor=structured.get("floor"),
         floors_total=structured.get("floors_total"),
+        latitude=structured.get("latitude"),
+        longitude=structured.get("longitude"),
         images=list(data.get("images") or []),
     )
 
@@ -110,6 +114,54 @@ def _print_alternatives(target: TargetListing, pairs) -> None:
             f"  Этаж:   {md.get('floor')}/{md.get('floors_total')}\n"
             f"  Текст:  {snippet}"
         )
+
+
+def _resolve_fair_price(
+    args: argparse.Namespace,
+    root: Path,
+    target: TargetListing,
+) -> Optional[float]:
+    if args.no_price_model:
+        return None
+
+    raw = Path(args.price_model)
+    model_path = raw if raw.is_absolute() else root / raw
+    if not model_path.exists():
+        print(
+            f"[i] CatBoost-модель не найдена ({model_path}). "
+            "Пропускаем оценку справедливой цены — обучи через train_price_model.py."
+        )
+        return None
+
+    from price_model import load_price_model, predict_fair_price
+
+    model = load_price_model(model_path)
+    if model is None:
+        return None
+    fair = predict_fair_price(
+        model,
+        total_area_m2=target.total_area_m2,
+        floor=target.floor,
+        floors_total=target.floors_total,
+        latitude=target.latitude,
+        longitude=target.longitude,
+        description=target.description,
+    )
+    if fair is None:
+        print("[i] CatBoost: не хватает фичей у цели (нужны площадь, этажи и координаты).")
+        return None
+
+    fair_str = _fmt_int(fair)
+    if target.price_rub:
+        delta = (target.price_rub - fair) / fair * 100.0
+        print(
+            f"\n[i] CatBoost оценка: {fair_str} ₽   "
+            f"факт {_fmt_int(target.price_rub)} ₽   "
+            f"отклонение {delta:+.1f}%"
+        )
+    else:
+        print(f"\n[i] CatBoost оценка справедливой цены: {fair_str} ₽")
+    return fair
 
 
 def main() -> None:
@@ -174,6 +226,18 @@ def main() -> None:
     parser.add_argument("--llm-api-key", type=str, default=None, help="API key LLM.")
     parser.add_argument("--llm-temperature", type=float, default=0.2, help="Температура LLM.")
 
+    parser.add_argument(
+        "--price-model",
+        type=str,
+        default="data/models/price_catboost.cbm",
+        help="Путь к обученной CatBoost-модели для оценки справедливой цены.",
+    )
+    parser.add_argument(
+        "--no-price-model",
+        action="store_true",
+        help="Не подгружать CatBoost-оценку справедливой цены.",
+    )
+
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent
@@ -186,13 +250,22 @@ def main() -> None:
     store = load_vector_store(persist_dir, model_name=args.model, device=args.device)
 
     exclude = [target.listing_id] if target.listing_id else None
-    pairs = search_alternatives_with_scores(
+    target_meta = {
+        "price_per_m2": target.price_per_m2,
+        "total_area_m2": target.total_area_m2,
+        "floor": target.floor,
+        "floors_total": target.floors_total,
+    }
+    pairs = search_alternatives_metadata_first(
         store,
         query=target.description,
+        target_metadata=target_meta,
         k=args.k,
         exclude_ids=exclude,
     )
     _print_alternatives(target, pairs)
+
+    fair_price = _resolve_fair_price(args, root, target)
 
     if args.no_report:
         return
@@ -204,7 +277,14 @@ def main() -> None:
         api_key=args.llm_api_key,
         temperature=args.llm_temperature,
     )
-    report = generate_report(target, store, llm, k=args.k)
+    report = generate_report(
+        target,
+        store,
+        llm,
+        k=args.k,
+        alternatives=pairs,
+        fair_price_rub=fair_price,
+    )
     print("\n=== Отчёт LLM ===\n")
     print(report)
 

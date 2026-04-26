@@ -24,12 +24,15 @@ REPORT_SYSTEM_PROMPT = (
 REPORT_HUMAN_PROMPT = (
     "## Проверяемая квартира\n"
     "{target}\n\n"
+    "{model_estimate_block}"
     "## Похожие объявления (топ-{k} по семантическому поиску)\n"
     "{alternatives}\n\n"
     "## Что нужно сделать\n"
     "Составь краткий отчёт строго по разделам:\n"
     "1. **Вывод** (одна фраза: выгодная / средняя / переоценённая сделка).\n"
-    "2. **Цена и ₽/м²** — сравни с медианой и диапазоном по похожим.\n"
+    "2. **Цена и ₽/м²** — сравни с медианой и диапазоном по похожим, и отдельно "
+    "с оценкой CatBoost (если она приведена). Если фактическая цена заметно ниже "
+    "оценки модели — это аргумент в пользу сделки, выше — повод для торга.\n"
     "3. **Плюсы на фоне конкурентов** — пунктами.\n"
     "4. **Минусы и риски** — пунктами, ссылайся на конкретные конкурирующие объявления.\n"
     "5. **На что обратить внимание перед сделкой** — 2–3 пункта.\n"
@@ -58,6 +61,8 @@ class TargetListing:
     total_area_m2: Optional[float] = None
     floor: Optional[int] = None
     floors_total: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     images: List[str] = field(default_factory=list)
 
     @property
@@ -143,9 +148,40 @@ def build_default_llm(
     return ChatOpenAI(**kwargs)
 
 
+def _format_model_estimate_block(
+    target: TargetListing,
+    fair_price_rub: Optional[float],
+) -> str:
+    if fair_price_rub is None:
+        return ""
+    lines = [
+        "## Оценка справедливой цены (CatBoost регрессор)",
+        f"Предсказанная цена: {_format_money(fair_price_rub)}",
+    ]
+    if target.price_rub:
+        delta_abs = float(target.price_rub) - float(fair_price_rub)
+        delta_pct = delta_abs / float(fair_price_rub) * 100.0
+        verdict = "ниже" if delta_abs < 0 else "выше"
+        lines.append(
+            f"Фактическая цена {_format_money(target.price_rub)} — "
+            f"{verdict} модели на {abs(delta_pct):.1f}% ({_format_money(abs(delta_abs))})."
+        )
+    if target.total_area_m2:
+        lines.append(
+            f"Соответствует ≈ {_format_money(float(fair_price_rub) / float(target.total_area_m2))}/м²."
+        )
+    lines.append(
+        "Модель учитывает площадь, этаж/этажность и координаты; "
+        "ремонт и состояние она не видит — поправку на это сделай по описанию."
+    )
+    return "\n".join(lines) + "\n\n"
+
+
 def build_report_prompt(
     target: TargetListing,
     alternatives: Sequence[tuple[Document, float]],
+    *,
+    fair_price_rub: Optional[float] = None,
 ) -> List[Any]:
     formatted_alts = "\n\n".join(
         _format_listing_brief(doc, score) for doc, score in alternatives
@@ -154,6 +190,7 @@ def build_report_prompt(
         target=_format_target_block(target),
         alternatives=formatted_alts or "(не найдено похожих объявлений)",
         k=len(alternatives),
+        model_estimate_block=_format_model_estimate_block(target, fair_price_rub),
     )
 
 
@@ -163,15 +200,20 @@ def generate_report(
     llm: BaseChatModel,
     *,
     k: int = 5,
+    alternatives: Optional[Sequence[tuple[Document, float]]] = None,
+    fair_price_rub: Optional[float] = None,
 ) -> str:
-    exclude = [target.listing_id] if target.listing_id else None
-    pairs = search_alternatives_with_scores(
-        vector_store,
-        query=target.description,
-        k=k,
-        exclude_ids=exclude,
+    if alternatives is None:
+        exclude = [target.listing_id] if target.listing_id else None
+        alternatives = search_alternatives_with_scores(
+            vector_store,
+            query=target.description,
+            k=k,
+            exclude_ids=exclude,
+        )
+    messages = build_report_prompt(
+        target, alternatives, fair_price_rub=fair_price_rub
     )
-    messages = build_report_prompt(target, pairs)
     response = llm.invoke(messages)
     content = response.content
     if isinstance(content, list):
