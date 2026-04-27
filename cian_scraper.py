@@ -29,6 +29,40 @@ class ListingArtifacts:
     images: List[str]
 
 
+_PHOTO_EXT = (".jpg", ".jpeg", ".png", ".webp")
+_NON_PHOTO_HINTS = (
+    "/icons/",
+    "/icon.",
+    "/icon-",
+    "header-frontend",
+    "frontend/",
+    "/logo",
+    "favicon",
+    "sprite",
+    "avatar",
+    "placeholder",
+)
+
+
+def is_listing_photo_url(url: Optional[str]) -> bool:
+    """True if URL looks like a real listing photo (not a UI asset like a header
+    icon or favicon). Cian's ``__APP_INITIAL_STATE__`` mixes bundled UI image
+    paths in with actual gallery URLs, so we filter them out."""
+    if not isinstance(url, str):
+        return False
+    s = url.strip()
+    if not s:
+        return False
+    lower = s.lower()
+    if not (lower.startswith(("http://", "https://")) or lower.startswith("//")):
+        return False
+    if not any(ext in lower for ext in _PHOTO_EXT):
+        return False
+    if any(hint in lower for hint in _NON_PHOTO_HINTS):
+        return False
+    return True
+
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -316,15 +350,14 @@ def _parse_app_initial_state(html: str) -> Dict[str, Any]:
             best_desc = text
     result["description"] = best_desc
 
-    # Картинки – собираем все URL, которые выглядят как ссылки на изображения
+    # Картинки – собираем только URL, похожие на реальные фото галереи
+    # (без UI-иконок Cian вроде header-frontend/icon.*.png).
     image_urls: List[str] = []
     seen: set[str] = set()
     for key, value in _walk_json(data):
-        if not isinstance(value, str):
+        if not isinstance(value, str) or value in seen:
             continue
-        if not any(ext in value.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-            continue
-        if value in seen:
+        if not is_listing_photo_url(value):
             continue
         seen.add(value)
         image_urls.append(value)
@@ -548,7 +581,7 @@ def _parse_images(soup: BeautifulSoup) -> List[str]:
             if not src:
                 continue
             src = src.strip()
-            if not src or src in seen:
+            if src in seen or not is_listing_photo_url(src):
                 continue
             seen.add(src)
             urls.append(src)
@@ -660,17 +693,9 @@ def _extract_images_from_json(data: Any) -> List[str]:
     image_urls: List[str] = []
     seen: set[str] = set()
     for _, value in _walk_json(data):
-        if not isinstance(value, str):
+        if not isinstance(value, str) or value in seen:
             continue
-        lower = value.lower()
-        if not lower.startswith(("http://", "https://")):
-            continue
-        if not any(ext in lower for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-            continue
-        # Skip small/icon assets and known non-photo paths.
-        if any(stop in lower for stop in ("/icons/", "/logo", "favicon", "sprite", "avatar")):
-            continue
-        if value in seen:
+        if not is_listing_photo_url(value):
             continue
         seen.add(value)
         image_urls.append(value)

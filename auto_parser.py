@@ -94,26 +94,65 @@ def discover_urls(
     start_page: int,
     end_page: int,
     proxies: Optional[List[str]] = None,
+    batch_size: int = 5,
+    max_empty_batches: int = 2,
 ) -> List[str]:
-    parser = cianparser.CianParser(location=location, proxies=proxies)
-    listings: List[Dict[str, Any]] = parser.get_flats(
-        deal_type=deal_type,
-        rooms=rooms,
-        with_saving_csv=False,
-        with_extra_data=False,
-        additional_settings={"start_page": start_page, "end_page": end_page},
-    )
-
+    # Cian после ~28-54 страниц начинает повторять те же объявления, поэтому
+    # бьём диапазон на батчи и выходим, когда несколько батчей подряд не дают
+    # новых URL — иначе cianparser молча листает страницы с дубликатами.
     seen: set[str] = set()
     urls: List[str] = []
-    for item in listings:
-        url = item.get("url")
-        if not isinstance(url, str) or not url:
+    empty_batches = 0
+
+    page = start_page
+    while page <= end_page:
+        batch_end = min(page + batch_size - 1, end_page)
+        parser = cianparser.CianParser(location=location, proxies=proxies)
+        try:
+            listings: List[Dict[str, Any]] = parser.get_flats(
+                deal_type=deal_type,
+                rooms=rooms,
+                with_saving_csv=False,
+                with_extra_data=False,
+                additional_settings={"start_page": page, "end_page": batch_end},
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[discover_urls] батч {page}-{batch_end} упал: {exc}",
+                file=sys.stderr,
+            )
+            page = batch_end + 1
             continue
-        if url in seen:
-            continue
-        seen.add(url)
-        urls.append(url)
+
+        new_count = 0
+        for item in listings:
+            url = item.get("url")
+            if not isinstance(url, str) or not url:
+                continue
+            if url in seen:
+                continue
+            seen.add(url)
+            urls.append(url)
+            new_count += 1
+
+        print(
+            f"[discover_urls] страницы {page}-{batch_end}: "
+            f"+{new_count} новых URL (всего {len(urls)})"
+        )
+
+        if new_count == 0:
+            empty_batches += 1
+            if empty_batches >= max_empty_batches:
+                print(
+                    f"[discover_urls] {empty_batches} батчей подряд без новых URL — "
+                    f"ранний выход на странице {batch_end}"
+                )
+                break
+        else:
+            empty_batches = 0
+
+        page = batch_end + 1
+
     return urls
 
 
@@ -166,6 +205,18 @@ def main() -> None:
         help="РџР°СЂР°Р»Р»РµР»СЊРЅРѕСЃС‚СЊ РїСЂРё РѕР±РѕРіР°С‰РµРЅРёРё С‡РµСЂРµР· Cian API (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ 2)",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=5,
+        help="Сколько страниц обрабатывать за один прогон cianparser (по умолчанию 5)",
+    )
+    parser.add_argument(
+        "--max-empty-batches",
+        type=int,
+        default=2,
+        help="Сколько батчей подряд без новых URL допускается перед ранним выходом (по умолчанию 2)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="РўРѕР»СЊРєРѕ СЃРѕР±СЂР°С‚СЊ URL Рё РЅР°РїРµС‡Р°С‚Р°С‚СЊ РёС…, Р±РµР· РѕР±РѕРіР°С‰РµРЅРёСЏ Рё DVC",
@@ -180,6 +231,8 @@ def main() -> None:
         rooms=rooms,
         start_page=args.start_page,
         end_page=args.end_page,
+        batch_size=args.batch_size,
+        max_empty_batches=args.max_empty_batches,
     )
     print(f"[auto_parser] РќР°Р№РґРµРЅРѕ {len(urls)} СѓРЅРёРєР°Р»СЊРЅС‹С… URL")
 

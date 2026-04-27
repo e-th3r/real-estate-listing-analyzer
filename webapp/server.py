@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from analyze_listing import _target_from_dataset, _target_from_scrape
+from cian_scraper import is_listing_photo_url
 from dataset_schema import _normalize_cian_url
 from report_generator import (
     TargetListing,
@@ -50,7 +51,7 @@ _store = None
 _listings_lock = Lock()
 _listings_cache: Dict[str, Any] = {"mtime": None, "frame": None}
 
-_DEDUP_KEYS = ["price_rub", "total_area_m2", "floor", "floors_total", "latitude", "longitude"]
+_DEDUP_KEYS = ["url"]
 
 
 def _target_from_html_fallback(url: str) -> TargetListing:
@@ -110,7 +111,7 @@ def _alt_to_dict(doc, score: float) -> Dict[str, Any]:
         "floors_total": md.get("floors_total"),
         "latitude": md.get("latitude"),
         "longitude": md.get("longitude"),
-        "image_url": md.get("image_url"),
+        "image_url": md.get("image_url") if is_listing_photo_url(md.get("image_url")) else None,
         "distance": float(score),
         "snippet": snippet,
     }
@@ -297,7 +298,7 @@ def _row_to_listing(row: pd.Series) -> Dict[str, Any]:
         "floors_total": _int(row.get("floors_total")),
         "latitude": _num(row.get("latitude")),
         "longitude": _num(row.get("longitude")),
-        "image_url": row.get("image_url") if isinstance(row.get("image_url"), str) else None,
+        "image_url": row.get("image_url") if is_listing_photo_url(row.get("image_url")) else None,
         "snippet": snippet,
     }
 

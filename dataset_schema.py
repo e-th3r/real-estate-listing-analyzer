@@ -54,16 +54,20 @@ _DATASET_SCHEMA = pa.DataFrameSchema(
             float,
             nullable=False,
             checks=[
-                pa.Check.ge(41.0),
-                pa.Check.le(82.0),
+                pa.Check(
+                    lambda s: (s == 0.0) | ((s >= 41.0) & (s <= 82.0)),
+                    error="latitude должен быть 0.0 либо в диапазоне [41.0, 82.0]",
+                ),
             ],
         ),
         "longitude": pa.Column(
             float,
             nullable=False,
             checks=[
-                pa.Check.ge(19.0),
-                pa.Check.le(191.0),
+                pa.Check(
+                    lambda s: (s == 0.0) | ((s >= 19.0) & (s <= 191.0)),
+                    error="longitude должен быть 0.0 либо в диапазоне [19.0, 191.0]",
+                ),
             ],
         ),
         "description": pa.Column(
