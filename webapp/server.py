@@ -15,17 +15,22 @@ from pydantic import BaseModel, Field
 
 from analyze_listing import _target_from_dataset, _target_from_scrape
 from dataset_schema import _normalize_cian_url
+from price_model import (
+    DEFAULT_MODEL_PATH as DEFAULT_PRICE_MODEL_PATH,
+    load_price_model,
+    predict_fair_price,
+)
 from report_generator import (
     TargetListing,
     build_default_llm,
-    build_report_prompt,
+    generate_report,
 )
 from vector_store import (
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_VECTOR_STORE_DIR,
     listing_id_from_url,
     load_vector_store,
-    search_alternatives_with_scores,
+    search_alternatives_metadata_first,
 )
 
 logger = logging.getLogger("webapp")
@@ -34,6 +39,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 ROOT = Path(__file__).resolve().parent.parent
 PARQUET_PATH = ROOT / "data" / "structured" / "listings_clean.parquet"
 PERSIST_DIR = ROOT / DEFAULT_VECTOR_STORE_DIR
+PRICE_MODEL_PATH = ROOT / DEFAULT_PRICE_MODEL_PATH
 STATIC_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="Listing Analyzer")
@@ -46,6 +52,10 @@ app.add_middleware(
 
 _store_lock = Lock()
 _store = None
+
+_price_model_lock = Lock()
+_price_model = None
+_price_model_loaded = False
 
 
 def _target_from_html_fallback(url: str) -> TargetListing:
@@ -69,6 +79,8 @@ def _target_from_html_fallback(url: str) -> TargetListing:
         total_area_m2=structured.get("total_area_m2"),
         floor=structured.get("floor"),
         floors_total=structured.get("floors_total"),
+        latitude=structured.get("latitude"),
+        longitude=structured.get("longitude"),
         images=list(data.get("images") or []),
     )
 
@@ -83,11 +95,58 @@ def _get_store():
         return _store
 
 
+def _get_price_model():
+    """Lazy-load CatBoost-модели справедливой цены. Кэшируется навсегда; если
+    файла нет, оставляем None — анализ продолжит работать без оценки."""
+    global _price_model, _price_model_loaded
+    with _price_model_lock:
+        if not _price_model_loaded:
+            if PRICE_MODEL_PATH.exists():
+                logger.info("Loading price model from %s", PRICE_MODEL_PATH)
+                try:
+                    _price_model = load_price_model(PRICE_MODEL_PATH)
+                except Exception as exc:
+                    logger.warning("Failed to load price model: %s", exc)
+                    _price_model = None
+            else:
+                logger.info("Price model not found at %s — пропускаем", PRICE_MODEL_PATH)
+                _price_model = None
+            _price_model_loaded = True
+        return _price_model
+
+
+def _compute_fair_price(target: TargetListing, *, skip: bool = False) -> Optional[float]:
+    if skip:
+        return None
+    model = _get_price_model()
+    if model is None:
+        return None
+    try:
+        return predict_fair_price(
+            model,
+            total_area_m2=target.total_area_m2,
+            floor=target.floor,
+            floors_total=target.floors_total,
+            latitude=target.latitude,
+            longitude=target.longitude,
+            description=target.description,
+        )
+    except Exception as exc:
+        logger.warning("CatBoost predict failed: %s", exc)
+        return None
+
+
 class AnalyzeRequest(BaseModel):
-    url: str = Field(..., description="Ссылка на объявление Cian")
+    url: Optional[str] = Field(None, description="Ссылка на объявление Cian")
+    text: Optional[str] = Field(
+        None, description="Произвольное описание квартиры / запрос (аналог --text в CLI)"
+    )
     k: int = Field(5, ge=1, le=10)
     report: bool = Field(False, description="Запрашивать LLM-отчёт")
     no_scrape: bool = Field(False, description="Не лезть в сеть, если URL не в датасете")
+    no_price_model: bool = Field(
+        False, description="Не подгружать CatBoost-оценку справедливой цены"
+    )
 
 
 def _alt_to_dict(doc, score: float) -> Dict[str, Any]:
@@ -128,47 +187,58 @@ def _target_to_dict(t: TargetListing, source: str) -> Dict[str, Any]:
 
 @app.post("/api/analyze")
 def analyze(req: AnalyzeRequest) -> Dict[str, Any]:
-    try:
-        norm_url = _normalize_cian_url(req.url)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Невалидный URL: {exc}") from exc
+    if not req.url and not req.text:
+        raise HTTPException(
+            status_code=400,
+            detail="Нужно задать url или text (аналог --url / --text в CLI).",
+        )
 
-    target = _target_from_dataset(PARQUET_PATH, norm_url)
-    source = "dataset"
-    if target is None:
-        if req.no_scrape:
-            raise HTTPException(
-                status_code=404,
-                detail="URL не найден в датасете, а scrape отключён.",
-            )
-        api_err: Optional[Exception] = None
+    target: Optional[TargetListing] = None
+    source = "text"
+    if req.url:
         try:
-            target = _target_from_scrape(norm_url)
-            source = "scrape_api"
+            norm_url = _normalize_cian_url(req.url)
         except Exception as exc:
-            api_err = exc
-            logger.warning("Cian API scrape failed, falling back to HTML: %s", exc)
-            try:
-                target = _target_from_html_fallback(norm_url)
-                source = "scrape_html"
-            except Exception as html_exc:
-                logger.exception("HTML fallback also failed")
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        f"Не удалось получить данные с Cian. "
-                        f"API: {api_err}; HTML: {html_exc}"
-                    ),
-                ) from html_exc
+            raise HTTPException(status_code=400, detail=f"Невалидный URL: {exc}") from exc
 
-        if not target.description or len(target.description) < 20:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Получили пустое или слишком короткое описание со страницы — "
-                    "семантический поиск не отработает. Попробуйте позже или другой URL."
-                ),
-            )
+        target = _target_from_dataset(PARQUET_PATH, norm_url)
+        source = "dataset"
+        if target is None:
+            if req.no_scrape:
+                raise HTTPException(
+                    status_code=404,
+                    detail="URL не найден в датасете, а scrape отключён.",
+                )
+            api_err: Optional[Exception] = None
+            try:
+                target = _target_from_scrape(norm_url)
+                source = "scrape_api"
+            except Exception as exc:
+                api_err = exc
+                logger.warning("Cian API scrape failed, falling back to HTML: %s", exc)
+                try:
+                    target = _target_from_html_fallback(norm_url)
+                    source = "scrape_html"
+                except Exception as html_exc:
+                    logger.exception("HTML fallback also failed")
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            f"Не удалось получить данные с Cian. "
+                            f"API: {api_err}; HTML: {html_exc}"
+                        ),
+                    ) from html_exc
+
+            if not target.description or len(target.description) < 20:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Получили пустое или слишком короткое описание со страницы — "
+                        "семантический поиск не отработает. Попробуйте позже или другой URL."
+                    ),
+                )
+    else:
+        target = TargetListing(description=req.text or "")
 
     try:
         store = _get_store()
@@ -176,23 +246,45 @@ def analyze(req: AnalyzeRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     exclude = [target.listing_id] if target.listing_id else None
-    pairs = search_alternatives_with_scores(
-        store, query=target.description, k=req.k, exclude_ids=exclude
+    target_meta = {
+        "price_per_m2": target.price_per_m2,
+        "total_area_m2": target.total_area_m2,
+        "floor": target.floor,
+        "floors_total": target.floors_total,
+    }
+    pairs = search_alternatives_metadata_first(
+        store,
+        query=target.description,
+        target_metadata=target_meta,
+        k=req.k,
+        exclude_ids=exclude,
     )
     alternatives = [_alt_to_dict(doc, score) for doc, score in pairs]
+
+    fair_price = _compute_fair_price(target, skip=req.no_price_model)
+    fair_price_block: Optional[Dict[str, Any]] = None
+    if fair_price is not None:
+        block: Dict[str, Any] = {"fair_price_rub": float(fair_price)}
+        if target.price_rub:
+            delta_abs = float(target.price_rub) - float(fair_price)
+            block["delta_rub"] = float(delta_abs)
+            block["delta_pct"] = float(delta_abs / float(fair_price) * 100.0)
+        if target.total_area_m2:
+            block["fair_price_per_m2"] = float(fair_price) / float(target.total_area_m2)
+        fair_price_block = block
 
     report_text: Optional[str] = None
     if req.report:
         try:
             llm = build_default_llm()
-            messages = build_report_prompt(target, pairs)
-            response = llm.invoke(messages)
-            content = response.content
-            if isinstance(content, list):
-                content = "".join(
-                    p.get("text", "") if isinstance(p, dict) else str(p) for p in content
-                )
-            report_text = str(content)
+            report_text = generate_report(
+                target,
+                store,
+                llm,
+                k=req.k,
+                alternatives=pairs,
+                fair_price_rub=fair_price,
+            )
         except Exception as exc:
             logger.exception("LLM report failed")
             report_text = f"(LLM-отчёт недоступен: {exc})"
@@ -200,6 +292,7 @@ def analyze(req: AnalyzeRequest) -> Dict[str, Any]:
     return {
         "target": _target_to_dict(target, source),
         "alternatives": alternatives,
+        "fair_price": fair_price_block,
         "report": report_text,
     }
 
@@ -276,6 +369,7 @@ def health() -> Dict[str, Any]:
         "ok": True,
         "parquet_exists": PARQUET_PATH.exists(),
         "vector_store_exists": PERSIST_DIR.exists(),
+        "price_model_exists": PRICE_MODEL_PATH.exists(),
     }
 
 
