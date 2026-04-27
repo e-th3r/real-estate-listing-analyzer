@@ -760,22 +760,86 @@ def _request_offer_candidates(listing_id: int, *, timeout: int) -> List[Dict[str
     return offers_found
 
 
+_cffi_session = None
+
+
+def _get_cffi_session():
+    """Reuse a single curl_cffi Session impersonating Chrome — Cian blocks
+    plain `requests`, but cianparser's underlying transport gets through."""
+    global _cffi_session
+    if _cffi_session is None:
+        from curl_cffi import requests as _crequests
+
+        sess = _crequests.Session(impersonate="chrome")
+        sess.headers.update(
+            {
+                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+                "User-Agent": HEADERS["User-Agent"],
+            }
+        )
+        _cffi_session = sess
+    return _cffi_session
+
+
+def _fetch_listing_html(url: str, *, timeout: int) -> str:
+    """Fetch a Cian listing page directly. Retries once if the response is
+    suspiciously short — Cian sometimes returns a ~40KB anti-bot stub for
+    the first hit on a fresh session."""
+    sess = _get_cffi_session()
+    last_html = ""
+    for attempt in range(3):
+        response = sess.get(url, timeout=timeout)
+        if response.status_code == 429:
+            time.sleep(5 + attempt * 5)
+            continue
+        response.raise_for_status()
+        last_html = response.text
+        if len(last_html) > 100_000:
+            return last_html
+        time.sleep(1.5 + attempt)
+    return last_html
+
+
+def _scrape_via_html(url: str, *, timeout: int) -> Dict[str, Any]:
+    html = _fetch_listing_html(url, timeout=timeout)
+    parsed = parse_cian_listing(html)
+    structured = parsed.get("structured") or {}
+    description = parsed.get("description") or ""
+    if not description or structured.get("price_rub") is None:
+        raise RuntimeError(
+            f"HTML страница {url} не содержит ожидаемых полей "
+            f"(price={structured.get('price_rub')}, len(desc)={len(description)})"
+        )
+    return parsed
+
+
 def scrape_cian_listing_via_cianpython(url: str, *, timeout: int = 20) -> Dict[str, Any]:
+    """Per-URL scrape with a guarantee: returned data corresponds to *this* URL.
+
+    Tries the Cian search API first (it carries coordinates), but falls back
+    to a direct HTML fetch when the API can't return the exact listing — the
+    old behavior of using `offers[0]` cross-contaminated the dataset.
+    """
     listing_id = _extract_listing_id(url)
-    offers = _request_offer_candidates(listing_id, timeout=timeout)
+    api_err: Optional[Exception] = None
     selected_offer: Optional[Dict[str, Any]] = None
-
-    for offer in offers:
-        offer_id = _extract_offer_id(offer)
-        if offer_id == listing_id:
-            selected_offer = offer
-            break
-
-    if selected_offer is None and offers:
-        selected_offer = offers[0]
+    try:
+        offers = _request_offer_candidates(listing_id, timeout=timeout)
+        for offer in offers:
+            if _extract_offer_id(offer) == listing_id:
+                selected_offer = offer
+                break
+    except Exception as exc:  # noqa: BLE001 — covers requests/timeouts/HTTP errors
+        api_err = exc
 
     if selected_offer is None:
-        raise RuntimeError(f"Не удалось получить объявление {listing_id} через Cian API")
+        try:
+            return _scrape_via_html(url, timeout=timeout)
+        except Exception as html_err:
+            raise RuntimeError(
+                f"Не удалось получить объявление {listing_id}: "
+                f"API={api_err or 'wrong listing'}, HTML={html_err}"
+            ) from html_err
 
     price_val = _extract_first_matching_number_from_json(
         selected_offer,

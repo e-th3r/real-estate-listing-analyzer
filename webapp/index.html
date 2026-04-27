@@ -92,6 +92,13 @@
   /* Active filter button state */
   .room-btn.active{background:#0F172A;color:#fff;}
   .pill.active{background:#0F172A;color:#fff;}
+
+  /* Tabs */
+  .tab-btn{color:#64748B;border-bottom:2px solid transparent;transition:color .2s,border-color .2s;}
+  .tab-btn.active{color:#0F172A;border-bottom-color:#0F172A;}
+
+  /* Highlight для "похожих" карточек в общей сетке */
+  .alt-similar{position:relative;box-shadow:0 0 0 2px #0F172A, 0 14px 32px -16px rgba(15,23,42,0.18);}
 </style>
 </head>
 <body class="min-h-screen antialiased">
@@ -275,17 +282,37 @@
     </div>
   </section>
 
-  <!-- Alternatives -->
+  <!-- Listings (вкладки: Все / Похожие) -->
   <section class="mt-6">
-    <div class="flex items-baseline justify-between mb-4">
-      <h2 class="display text-2xl text-slate-900">Похожие квартиры</h2>
-      <span id="alt-meta" class="text-sm text-slate-500">после анализа подберём ближайшие по характеристикам варианты</span>
+    <div class="flex flex-wrap items-end justify-between gap-3 mb-4 border-b border-[var(--line)]">
+      <div class="flex items-center gap-6">
+        <button id="tab-all" type="button" class="tab-btn display text-2xl pb-2 cursor-pointer">Все квартиры</button>
+        <button id="tab-similar" type="button" class="tab-btn display text-2xl pb-2 cursor-pointer" disabled>Похожие</button>
+      </div>
+      <div class="flex items-center gap-3 pb-3">
+        <label id="sort-wrap" class="text-xs text-slate-500 inline-flex items-center gap-2">
+          Сортировка
+          <select id="sort-select" class="h-8 px-2 rounded-lg border border-gray-200 bg-white text-xs text-slate-700 cursor-pointer">
+            <option value="recent">по умолчанию</option>
+            <option value="price_asc">цена ↑</option>
+            <option value="price_desc">цена ↓</option>
+            <option value="ppm_asc">₽/м² ↑</option>
+            <option value="ppm_desc">₽/м² ↓</option>
+          </select>
+        </label>
+        <span id="alt-meta" class="text-sm text-slate-500">загружаем квартиры…</span>
+      </div>
     </div>
     <div id="alternatives" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <div class="tile overflow-hidden"><div class="aspect-[4/3] skeleton-line"></div><div class="p-4 space-y-2"><div class="h-5 w-3/5 rounded skeleton-line"></div><div class="h-4 w-2/5 rounded skeleton-line"></div><div class="h-3 w-1/2 rounded skeleton-line"></div></div></div>
       <div class="tile overflow-hidden"><div class="aspect-[4/3] skeleton-line"></div><div class="p-4 space-y-2"><div class="h-5 w-3/5 rounded skeleton-line"></div><div class="h-4 w-2/5 rounded skeleton-line"></div><div class="h-3 w-1/2 rounded skeleton-line"></div></div></div>
       <div class="tile overflow-hidden"><div class="aspect-[4/3] skeleton-line"></div><div class="p-4 space-y-2"><div class="h-5 w-3/5 rounded skeleton-line"></div><div class="h-4 w-2/5 rounded skeleton-line"></div><div class="h-3 w-1/2 rounded skeleton-line"></div></div></div>
       <div class="tile overflow-hidden"><div class="aspect-[4/3] skeleton-line"></div><div class="p-4 space-y-2"><div class="h-5 w-3/5 rounded skeleton-line"></div><div class="h-4 w-2/5 rounded skeleton-line"></div><div class="h-3 w-1/2 rounded skeleton-line"></div></div></div>
+    </div>
+    <div class="mt-5 flex justify-center">
+      <button id="load-more" type="button" class="hidden h-10 px-5 rounded-xl border border-gray-200 bg-white text-sm text-slate-700 hover:bg-slate-50 transition-colors duration-200 cursor-pointer ring-focus">
+        Показать ещё
+      </button>
     </div>
   </section>
 
@@ -574,18 +601,25 @@
   const altCard = (a) => {
     const ppm = a.price_per_m2 ?? (a.price_rub && a.total_area_m2 ? a.price_rub/a.total_area_m2 : null);
     const imgSrc = a.image_url ? a.image_url.replace(/"/g,'&quot;') : '';
+    const isSimilar = !!a._similar;
+    const overlay = isSimilar
+      ? `<span class="absolute top-3 left-3 inline-flex items-center gap-1.5 h-6 px-2 rounded-full bg-slate-900 text-white text-[11px] font-medium">Похожая · d=${(a.distance ?? 0).toFixed(3)}</span>`
+      : (Number.isFinite(a.distance)
+          ? `<span class="absolute top-3 left-3 inline-flex h-6 px-2 rounded-full bg-white/95 text-[11px] text-slate-700">d=${a.distance.toFixed(3)}</span>`
+          : '');
     const photo = imgSrc
       ? `<div class="aspect-[4/3] bg-slate-100 relative overflow-hidden">
            <img src="${imgSrc}" alt="" loading="lazy" referrerpolicy="no-referrer"
                 class="absolute inset-0 w-full h-full object-cover"
                 onerror="this.style.display='none';this.parentNode.classList.add('grid-photo');" />
-           <span class="absolute top-3 left-3 inline-flex h-6 px-2 rounded-full bg-white/95 text-[11px] text-slate-700">d=${a.distance.toFixed(3)}</span>
+           ${overlay}
          </div>`
       : `<div class="aspect-[4/3] grid-photo relative">
-           <span class="absolute top-3 left-3 inline-flex h-6 px-2 rounded-full bg-white/95 text-[11px] text-slate-700">d=${a.distance.toFixed(3)}</span>
+           ${overlay}
          </div>`;
+    const cls = `tile tile-hover overflow-hidden cursor-pointer ring-focus block${isSimilar ? ' alt-similar' : ''}`;
     return `
-      <a href="${a.url}" target="_blank" rel="noopener" class="tile tile-hover overflow-hidden cursor-pointer ring-focus block">
+      <a href="${a.url}" target="_blank" rel="noopener" class="${cls}">
         ${photo}
         <div class="p-4">
           <div class="flex items-baseline justify-between gap-2">
@@ -607,6 +641,103 @@
     altGrid.innerHTML = items.map(altCard).join('');
     altMeta.textContent = `показано ${items.length}`;
   }
+
+  // ---- Tabs / All listings ----
+  const tabAll = $('tab-all');
+  const tabSimilar = $('tab-similar');
+  const sortSelect = $('sort-select');
+  const loadMoreBtn = $('load-more');
+  const reportSectionEl = () => $('report-section');
+
+  let mode = 'all';            // 'all' | 'similar'
+  let allListings = [];        // загружено из /api/listings (накопительно)
+  let allTotal = 0;
+  let allOffset = 0;
+  const PAGE_SIZE = 24;
+  let loadingPage = false;
+  const similarKeys = new Set(); // listing_id'ы похожих, чтобы подсветить в общей сетке
+
+  function listingKey(item){
+    return item.listing_id ?? item.url ?? '';
+  }
+
+  function setMode(next){
+    mode = next;
+    tabAll.classList.toggle('active', mode === 'all');
+    tabSimilar.classList.toggle('active', mode === 'similar');
+    targetCard.classList.toggle('hidden', mode === 'all');
+    rerender();
+  }
+
+  function mergeSimilarFlags(items){
+    if (!similarKeys.size) return items;
+    return items.map(it => similarKeys.has(listingKey(it)) ? {...it, _similar: true} : it);
+  }
+
+  function rerender(){
+    if (mode === 'similar'){
+      loadMoreBtn.classList.add('hidden');
+      const filtered = allAlternatives.filter(passesFilters).map(a => ({...a, _similar: true}));
+      renderAlternatives(filtered);
+      updateMap(filtered);
+      altMeta.textContent = allAlternatives.length
+        ? `${filtered.length} из ${allAlternatives.length} похожих`
+        : 'нет результатов анализа';
+      return;
+    }
+    // mode === 'all': похожие поднимаем наверх, остальные — далее
+    const flagged = mergeSimilarFlags(allListings);
+    const similar = flagged.filter(i => i._similar);
+    const others = flagged.filter(i => !i._similar);
+    const ordered = [...similar, ...others];
+    const filtered = ordered.filter(passesFilters);
+    renderAlternatives(filtered);
+    updateMap(filtered);
+    const loaded = allListings.length;
+    const tail = allTotal ? ` из ${allTotal.toLocaleString('ru-RU')}` : '';
+    const simNote = similar.length ? ` · ${similar.length} похожих` : '';
+    altMeta.textContent = `показано ${filtered.length}${tail}${simNote}`;
+    loadMoreBtn.classList.toggle('hidden', loaded >= allTotal);
+  }
+
+  // Переопределяем applyFilters: теперь это просто перерисовка текущего режима.
+  applyFilters = function(){ rerender(); };
+
+  async function fetchListingsPage(reset){
+    if (loadingPage) return;
+    loadingPage = true;
+    if (reset){ allListings = []; allOffset = 0; }
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(allOffset),
+      sort: sortSelect.value,
+    });
+    try {
+      const r = await fetch(API('/api/listings?' + params.toString()));
+      if (!r.ok) throw new Error(r.statusText);
+      const data = await r.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      allListings = allListings.concat(items);
+      allOffset += items.length;
+      allTotal = data.total || allListings.length;
+    } catch (e) {
+      console.warn('listings failed', e);
+      altMeta.textContent = 'не удалось загрузить квартиры';
+    } finally {
+      loadingPage = false;
+      if (mode === 'all') rerender();
+    }
+  }
+
+  tabAll.addEventListener('click', () => setMode('all'));
+  tabSimilar.addEventListener('click', () => {
+    if (tabSimilar.disabled) return;
+    setMode('similar');
+  });
+  sortSelect.addEventListener('change', () => {
+    if (mode === 'all') fetchListingsPage(true);
+  });
+  loadMoreBtn.addEventListener('click', () => fetchListingsPage(false));
 
   function galleryHTML(images, dot, label){
     if (!images.length) {
@@ -767,7 +898,10 @@
       renderTarget(data.target);
 
       allAlternatives = Array.isArray(data.alternatives) ? data.alternatives : [];
-      applyFilters();
+      similarKeys.clear();
+      allAlternatives.forEach(a => similarKeys.add(listingKey(a)));
+      tabSimilar.disabled = allAlternatives.length === 0;
+      setMode(allAlternatives.length ? 'similar' : 'all');
 
       if (data.report){
         $('report-body').textContent = data.report;
@@ -786,9 +920,10 @@
     }
   });
 
-  // Initial state — clear skeletons and show empty map badge.
-  altGrid.innerHTML = '<div class="col-span-full tile p-6 text-sm text-slate-500">Введите ссылку Cian, чтобы увидеть похожие объявления.</div>';
-  $('map-badge-text').textContent = 'Введите ссылку Cian';
+  // Initial state — стартуем во вкладке «Все», подгружаем первую страницу.
+  $('map-badge-text').textContent = 'Загрузка карты…';
+  setMode('all');
+  fetchListingsPage(true);
 
   loadStats();
 })();

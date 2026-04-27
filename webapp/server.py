@@ -7,7 +7,7 @@ from threading import Lock
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -46,6 +46,11 @@ app.add_middleware(
 
 _store_lock = Lock()
 _store = None
+
+_listings_lock = Lock()
+_listings_cache: Dict[str, Any] = {"mtime": None, "frame": None}
+
+_DEDUP_KEYS = ["price_rub", "total_area_m2", "floor", "floors_total", "latitude", "longitude"]
 
 
 def _target_from_html_fallback(url: str) -> TargetListing:
@@ -210,6 +215,7 @@ def stats() -> Dict[str, Any]:
         return {"total": 0, "clean": 0, "anomalies": 0, "median_price_per_m2": None}
 
     frame = pd.read_parquet(PARQUET_PATH)
+    frame = frame.drop_duplicates(subset=_DEDUP_KEYS, keep="first")
     total = int(len(frame))
     median_ppm = None
     median_price = None
@@ -238,6 +244,113 @@ def stats() -> Dict[str, Any]:
         "median_price_per_m2": median_ppm,
         "median_price_rub": median_price,
     }
+
+
+def _load_listings_frame() -> Optional[pd.DataFrame]:
+    if not PARQUET_PATH.exists():
+        return None
+    mtime = PARQUET_PATH.stat().st_mtime
+    with _listings_lock:
+        if _listings_cache["mtime"] != mtime or _listings_cache["frame"] is None:
+            frame = pd.read_parquet(PARQUET_PATH)
+            # Scraper sometimes ingests the same flat under many URLs; collapse them
+            # so the UI doesn't show 300 visually-identical cards.
+            frame = frame.drop_duplicates(subset=_DEDUP_KEYS, keep="first").reset_index(drop=True)
+            _listings_cache["frame"] = frame
+            _listings_cache["mtime"] = mtime
+        return _listings_cache["frame"]
+
+
+def _row_to_listing(row: pd.Series) -> Dict[str, Any]:
+    def _num(val: Any) -> Optional[float]:
+        if val is None or pd.isna(val):
+            return None
+        return float(val)
+
+    def _int(val: Any) -> Optional[int]:
+        v = _num(val)
+        return int(v) if v is not None else None
+
+    price = _num(row.get("price_rub"))
+    area = _num(row.get("total_area_m2"))
+    ppm = price / area if price and area else None
+    description = row.get("description") or ""
+    snippet = " ".join(str(description).split())
+    if len(snippet) > 320:
+        snippet = snippet[:320].rstrip() + "…"
+
+    listing_id: Optional[int] = None
+    url = row.get("url")
+    if isinstance(url, str):
+        try:
+            listing_id = listing_id_from_url(url)
+        except ValueError:
+            listing_id = None
+
+    return {
+        "url": url,
+        "listing_id": listing_id,
+        "price_rub": _int(price),
+        "total_area_m2": area,
+        "price_per_m2": ppm,
+        "floor": _int(row.get("floor")),
+        "floors_total": _int(row.get("floors_total")),
+        "latitude": _num(row.get("latitude")),
+        "longitude": _num(row.get("longitude")),
+        "image_url": row.get("image_url") if isinstance(row.get("image_url"), str) else None,
+        "snippet": snippet,
+    }
+
+
+@app.get("/api/listings")
+def listings(
+    limit: int = Query(24, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    price_min: Optional[float] = Query(None, ge=0),
+    price_max: Optional[float] = Query(None, ge=0),
+    rooms: Optional[str] = Query(None, description="CSV комнат, 4 = 4+"),
+    sort: str = Query("recent", pattern="^(recent|price_asc|price_desc|ppm_asc|ppm_desc)$"),
+) -> Dict[str, Any]:
+    frame = _load_listings_frame()
+    if frame is None or frame.empty:
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
+
+    df = frame
+    if price_min is not None:
+        df = df[df["price_rub"].astype(float) >= price_min]
+    if price_max is not None:
+        df = df[df["price_rub"].astype(float) <= price_max]
+
+    if rooms:
+        wanted: List[int] = []
+        for token in rooms.split(","):
+            token = token.strip()
+            if token.isdigit():
+                wanted.append(int(token))
+        if wanted:
+            desc = df["description"].astype(str).str.lower()
+            mask = pd.Series(False, index=df.index)
+            for r in wanted:
+                if r >= 4:
+                    mask = mask | desc.str.contains(r"(?:[4-9]|\d{2,})\s*-?\s*комн", regex=True, na=False)
+                else:
+                    mask = mask | desc.str.contains(rf"(?<!\d){r}\s*-?\s*комн", regex=True, na=False)
+            df = df[mask]
+
+    if sort == "price_asc":
+        df = df.sort_values("price_rub", ascending=True, kind="stable")
+    elif sort == "price_desc":
+        df = df.sort_values("price_rub", ascending=False, kind="stable")
+    elif sort in ("ppm_asc", "ppm_desc"):
+        ppm = df["price_rub"].astype(float) / df["total_area_m2"].astype(float)
+        df = df.assign(_ppm=ppm).sort_values(
+            "_ppm", ascending=(sort == "ppm_asc"), kind="stable"
+        ).drop(columns="_ppm")
+
+    total = int(len(df))
+    page = df.iloc[offset : offset + limit]
+    items = [_row_to_listing(row) for _, row in page.iterrows()]
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @app.get("/api/images")
