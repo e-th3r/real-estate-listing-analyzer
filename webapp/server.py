@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Optional
+
+# Allow `python webapp/server.py` to import sibling modules from the project root.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from env_loader import load_project_env
+
+load_project_env()
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query

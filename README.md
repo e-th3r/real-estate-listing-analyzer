@@ -50,7 +50,8 @@ real-estate-listing-analyzer/
 - Git
 - DVC (`dvc[ssh]`)
 - Synology NAS DS218 c SSH-доступом
-- Доступ к LLM-эндпоинту (LM Studio / Ollama / OpenAI-совместимый) — только для отчётов
+- Доступ к LLM-эндпоинту: Together AI (рекомендуется), LM Studio / Ollama или любой
+  OpenAI-совместимый — только для отчётов
 
 ## Установка (Windows PowerShell)
 
@@ -190,15 +191,36 @@ python webapp/server.py
 
 ### LLM-конфигурация
 
-`report_generator.build_default_llm` читает переменные окружения:
+`report_generator.build_default_llm` подхватывает конфиг из `.env`
+(автоматически через `python-dotenv`) или из переменных окружения. Образец —
+в [.env.example](.env.example): скопируйте его в `.env` и впишите свой ключ.
 
-```bash
-export LISTING_LLM_BASE_URL="http://localhost:1234/v1"   # LM Studio / Ollama
-export LISTING_LLM_MODEL="qwen2.5-7b-instruct"
-export LISTING_LLM_API_KEY="local"
+**Together AI (рекомендуется, serverless):** достаточно одной переменной —
+`TOGETHER_API_KEY`. Базовый URL и модель проставляются автоматически:
+
+```dotenv
+# .env
+TOGETHER_API_KEY=tgp_v1_...
+# Опционально (по умолчанию deepseek-ai/DeepSeek-V3):
+# LISTING_LLM_MODEL=Qwen/Qwen2.5-72B-Instruct-Turbo
 ```
 
-Для облачного OpenAI достаточно `OPENAI_API_KEY` + `LISTING_LLM_MODEL=gpt-4o-mini`.
+При этом `build_default_llm` ставит `base_url=https://api.together.xyz/v1` и
+модель `deepseek-ai/DeepSeek-V3` — serverless-эндпоинт, оплата по токенам.
+
+**Локальный LM Studio / Ollama:**
+
+```dotenv
+LISTING_LLM_BASE_URL=http://localhost:1234/v1
+LISTING_LLM_MODEL=qwen2.5-7b-instruct
+LISTING_LLM_API_KEY=local
+```
+
+**Облачный OpenAI:** `OPENAI_API_KEY` + `LISTING_LLM_MODEL=gpt-4o-mini`.
+
+Приоритет: явные CLI-флаги (`--llm-*`) → `LISTING_LLM_*` → `TOGETHER_API_KEY`
+→ `OPENAI_API_KEY`. Файл `.env` должен лежать в корне проекта; он уже в
+`.gitignore` — **никогда не коммитьте реальный ключ**.
 
 ## Схема Pandera и правила качества
 

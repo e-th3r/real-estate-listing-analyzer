@@ -4,7 +4,10 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
+from env_loader import load_project_env
 from langchain_chroma import Chroma
+
+load_project_env()
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
@@ -112,6 +115,10 @@ def _format_target_block(target: TargetListing) -> str:
     return "\n".join(lines)
 
 
+TOGETHER_BASE_URL = "https://api.together.xyz/v1"
+TOGETHER_DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3"
+
+
 def build_default_llm(
     *,
     model: Optional[str] = None,
@@ -119,18 +126,37 @@ def build_default_llm(
     api_key: Optional[str] = None,
     temperature: float = 0.2,
 ) -> ChatOpenAI:
-    """Создаёт ChatOpenAI, по умолчанию читая параметры из окружения.
+    """Создаёт ChatOpenAI поверх любого OpenAI-совместимого провайдера.
 
-    Совместим с LM Studio / Ollama (через OpenAI-совместимый эндпоинт) и
-    с реальным OpenAI API. Параметры можно задать переменными окружения:
+    Приоритет источников конфигурации:
 
-    - LISTING_LLM_MODEL  (например, "gpt-4o-mini" или локальный alias)
-    - LISTING_LLM_BASE_URL  (например, "http://localhost:1234/v1" для LM Studio)
-    - LISTING_LLM_API_KEY  (для OpenAI; для локальных серверов годится любой токен)
+    1. Явные аргументы функции.
+    2. Переменные окружения `LISTING_LLM_*` (модель / base_url / api_key).
+    3. Together AI: если задан `TOGETHER_API_KEY` — base_url и модель
+       выставляются автоматически (`https://api.together.xyz/v1`,
+       serverless-модель DeepSeek-V3 по умолчанию).
+    4. Fallback: `OPENAI_API_KEY` + дефолтная модель `gpt-4o-mini`.
+
+    Локальные серверы (LM Studio / Ollama) задаются через
+    `LISTING_LLM_BASE_URL=http://localhost:1234/v1`.
     """
-    resolved_model = model or os.environ.get("LISTING_LLM_MODEL", "gpt-4o-mini")
-    resolved_base_url = base_url or os.environ.get("LISTING_LLM_BASE_URL")
-    resolved_api_key = api_key or os.environ.get("LISTING_LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    together_key = os.environ.get("TOGETHER_API_KEY")
+
+    resolved_base_url = (
+        base_url
+        or os.environ.get("LISTING_LLM_BASE_URL")
+        or (TOGETHER_BASE_URL if together_key else None)
+    )
+    resolved_api_key = (
+        api_key
+        or os.environ.get("LISTING_LLM_API_KEY")
+        or together_key
+        or os.environ.get("OPENAI_API_KEY")
+    )
+
+    is_together = resolved_base_url == TOGETHER_BASE_URL
+    default_model = TOGETHER_DEFAULT_MODEL if is_together else "gpt-4o-mini"
+    resolved_model = model or os.environ.get("LISTING_LLM_MODEL") or default_model
 
     kwargs: Dict[str, Any] = {"model": resolved_model, "temperature": temperature}
     if resolved_base_url:
@@ -138,7 +164,6 @@ def build_default_llm(
     if resolved_api_key:
         kwargs["api_key"] = resolved_api_key
     elif resolved_base_url:
-        # Локальные серверы (LM Studio / Ollama) обычно требуют непустой токен.
         kwargs["api_key"] = "local"
     return ChatOpenAI(**kwargs)
 

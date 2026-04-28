@@ -5,6 +5,9 @@ from typing import Optional
 import pandas as pd
 
 from dataset_schema import _normalize_cian_url
+from env_loader import load_project_env
+
+load_project_env()
 from report_generator import (
     TargetListing,
     build_default_llm,

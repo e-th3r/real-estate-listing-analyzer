@@ -119,143 +119,112 @@
 
 <main class="max-w-7xl mx-auto px-4 sm:px-6 pt-24 pb-24">
 
-  <!-- Hero / search bento -->
-  <section class="grid grid-cols-12 gap-4">
-    <!-- Headline tile -->
-    <div class="col-span-12 lg:col-span-7 tile p-7 sm:p-9">
-      <p id="hero-count-line" class="eyebrow mb-4">Загружаем актуальные цены…</p>
-      <h1 class="display display-xl text-4xl sm:text-5xl lg:text-[56px] text-slate-900">
-        Найдите квартиру —<br/>и узнайте честную цену.
-      </h1>
-      <p class="mt-5 text-slate-600 text-[15px] max-w-xl leading-relaxed">
-        Вставьте ссылку на объявление — мы сравним его с похожими и подскажем, выгодное ли это предложение.
-      </p>
+  <!-- Compact hero: search + dataset count -->
+  <section class="tile p-5 sm:p-6">
+    <div class="grid grid-cols-12 gap-4 items-center">
+      <div class="col-span-12 lg:col-span-8">
+        <h1 class="display text-2xl sm:text-3xl text-slate-900">Узнайте честную цену квартиры.</h1>
+        <form id="analyze-form" class="mt-3 flex flex-col sm:flex-row gap-2">
+          <div class="flex-1 flex items-center gap-2 h-11 px-3.5 rounded-xl border border-gray-200 bg-white">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <label for="q" class="sr-only">Ссылка Cian</label>
+            <input id="q" name="url" type="url" required
+                   placeholder="https://www.cian.ru/sale/flat/328442756/"
+                   class="flex-1 bg-transparent outline-none text-slate-900 placeholder:text-slate-400" />
+          </div>
+          <label for="report" class="h-11 px-3 rounded-xl border border-gray-200 bg-white text-sm text-slate-700 inline-flex items-center gap-2 cursor-pointer">
+            <input id="report" name="report" type="checkbox" class="accent-slate-900" />
+            LLM-отчёт
+          </label>
+          <button id="submit-btn" type="submit" class="h-11 px-5 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors duration-200 cursor-pointer ring-focus disabled:opacity-60 disabled:cursor-not-allowed">
+            Анализировать
+          </button>
+        </form>
+        <p id="form-error" class="hidden mt-2 text-sm text-red-600" role="alert"></p>
+      </div>
 
-      <!-- Search bar -->
-      <form id="analyze-form" class="mt-7 flex flex-col sm:flex-row gap-2 sm:gap-2.5">
-        <div class="flex-1 flex items-center gap-2 h-12 px-3.5 rounded-xl border border-gray-200 bg-white">
-          <svg viewBox="0 0 24 24" class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-          <label for="q" class="sr-only">Ссылка Cian</label>
-          <input id="q" name="url" type="url" required
-                 placeholder="https://www.cian.ru/sale/flat/328442756/"
-                 class="flex-1 bg-transparent outline-none text-slate-900 placeholder:text-slate-400" />
+      <div class="col-span-12 lg:col-span-4 lg:border-l lg:border-[var(--line)] lg:pl-5">
+        <div class="text-[11px] uppercase tracking-wider text-slate-500">Объявлений в базе</div>
+        <div class="flex items-baseline gap-3 mt-1">
+          <div id="hero-validity" class="display num text-3xl text-slate-900">—</div>
+          <button id="stats-toggle" type="button" class="text-xs text-slate-500 hover:text-slate-900 cursor-pointer transition-colors duration-200 inline-flex items-center gap-1">
+            Статистика
+            <svg viewBox="0 0 24 24" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
         </div>
-        <label for="report" class="h-12 px-3 rounded-xl border border-gray-200 bg-white text-sm text-slate-700 inline-flex items-center gap-2 cursor-pointer">
-          <input id="report" name="report" type="checkbox" class="accent-slate-900" />
-          LLM-отчёт
-        </label>
-        <button id="submit-btn" type="submit" class="h-12 px-5 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors duration-200 cursor-pointer ring-focus disabled:opacity-60 disabled:cursor-not-allowed">
-          Анализировать
-        </button>
-      </form>
-      <p id="form-error" class="hidden mt-3 text-sm text-red-600" role="alert"></p>
+        <div id="hero-count-line" class="text-[11px] text-slate-500 mt-1 truncate">Загружаем актуальные цены…</div>
+      </div>
+    </div>
+  </section>
 
-      <!-- Pills -->
-      <div class="mt-5 flex flex-wrap gap-2">
-        <button type="button" data-quick="rooms:1" class="pill quick-pill h-8 px-3 rounded-full text-xs text-slate-700 hover:bg-slate-200 transition-colors duration-200 cursor-pointer">1-комн</button>
-        <button type="button" data-quick="rooms:2" class="pill quick-pill h-8 px-3 rounded-full text-xs text-slate-700 hover:bg-slate-200 transition-colors duration-200 cursor-pointer">2-комн</button>
-        <button type="button" data-quick="price-max:15" class="pill quick-pill h-8 px-3 rounded-full text-xs text-slate-700 hover:bg-slate-200 transition-colors duration-200 cursor-pointer">До 15 млн ₽</button>
+  <!-- Target listing (hidden until analysis) -->
+  <section id="target-section" class="mt-4 hidden">
+    <div id="target-card" class="tile overflow-hidden"></div>
+  </section>
+
+  <!-- Filter bar -->
+  <section class="mt-4 tile p-3 sm:p-4">
+    <div class="flex flex-wrap items-center gap-3">
+      <div class="flex flex-wrap gap-1.5">
+        <button type="button" data-rooms="1" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">1</button>
+        <button type="button" data-rooms="2" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">2</button>
+        <button type="button" data-rooms="3" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">3</button>
+        <button type="button" data-rooms="4" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">4+</button>
+      </div>
+
+      <div class="flex-1 min-w-[200px] max-w-md flex items-center gap-3">
+        <span class="text-xs text-slate-500 whitespace-nowrap">Цена, млн ₽</span>
+        <div id="price-range" class="range-wrap flex-1">
+          <div class="range-track"></div>
+          <div id="price-fill" class="range-fill" style="left:5%;right:75%"></div>
+          <input id="price-min" type="range" min="0" max="100" step="0.5" value="5" aria-label="Минимальная цена" />
+          <input id="price-max" type="range" min="0" max="100" step="0.5" value="25" aria-label="Максимальная цена" />
+        </div>
+        <span class="text-xs text-slate-700 whitespace-nowrap num"><span id="price-min-label">5</span>–<span id="price-max-label">25</span></span>
+      </div>
+
+      <div class="flex flex-wrap gap-1.5">
         <button type="button" data-quick="material:кирпич" class="pill quick-pill h-8 px-3 rounded-full text-xs text-slate-700 hover:bg-slate-200 transition-colors duration-200 cursor-pointer">Кирпич</button>
         <button type="button" data-quick="not-first-floor" class="pill quick-pill h-8 px-3 rounded-full text-xs text-slate-700 hover:bg-slate-200 transition-colors duration-200 cursor-pointer">Не первый этаж</button>
       </div>
-    </div>
 
-    <!-- Stats stack -->
-    <div class="col-span-12 lg:col-span-5 grid grid-cols-2 gap-4">
-      <div class="tile p-5">
-        <div class="eyebrow">Средняя цена м²</div>
-        <div id="hero-ppm" class="display num text-4xl mt-2 text-slate-900">—</div>
-        <div class="mt-2 text-xs text-slate-500">по похожим объявлениям</div>
-      </div>
-      <div class="tile p-5">
-        <div class="text-[11px] uppercase tracking-wider text-slate-500">Объявлений в базе</div>
-        <div id="hero-validity" class="display num text-4xl mt-2 text-slate-900">—</div>
-        <div class="mt-2 text-xs text-slate-500">готовы для сравнения</div>
-      </div>
-
-      <!-- Spark trend -->
-      <div class="col-span-2 tile p-5">
-        <div class="flex items-baseline justify-between">
-          <div>
-            <div class="text-[11px] uppercase tracking-wider text-slate-500">Типичная цена квартиры</div>
-            <div id="hero-median-price" class="display num text-3xl mt-1.5 text-slate-900">—</div>
-          </div>
-          <div class="flex gap-1">
-            <button class="pill h-7 px-2.5 rounded-md text-[11px] text-slate-700 cursor-pointer">3M</button>
-            <button class="h-7 px-2.5 rounded-md text-[11px] text-white bg-slate-900 cursor-pointer">12M</button>
-          </div>
-        </div>
-        <svg viewBox="0 0 320 80" class="mt-3 w-full h-20" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stop-color="#0F172A" stop-opacity="0.18"/>
-              <stop offset="100%" stop-color="#0F172A" stop-opacity="0"/>
-            </linearGradient>
-          </defs>
-          <path d="M0,55 L26,50 52,52 78,44 104,46 130,38 156,40 182,30 208,34 234,24 260,28 286,18 312,22 320,20 L320,80 0,80 Z" fill="url(#g1)"/>
-          <path d="M0,55 L26,50 52,52 78,44 104,46 130,38 156,40 182,30 208,34 234,24 260,28 286,18 312,22 320,20" fill="none" stroke="#0F172A" stroke-width="1.5"/>
-        </svg>
-      </div>
+      <button id="filters-reset" type="button" class="ml-auto text-xs text-slate-500 hover:text-slate-900 cursor-pointer transition-colors duration-200">Сбросить</button>
     </div>
+    <p id="filter-meta" class="hidden text-[11px] text-slate-500 mt-2">Фильтры применяются к найденным похожим объявлениям.</p>
   </section>
 
-  <!-- Listings bento -->
-  <section class="mt-6 grid grid-cols-12 gap-4">
-    <!-- Target listing tile (filled after analysis) -->
-    <div id="target-card" class="col-span-12 lg:col-span-7 tile overflow-hidden">
-      <div class="relative aspect-[16/10] grid-photo">
-        <span id="target-badge" class="absolute top-4 left-4 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-white/90 text-[11px] font-medium text-slate-700">
-          <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
-          Ожидает ссылки
-        </span>
+  <!-- Stats drawer -->
+  <div id="stats-drawer" class="fixed inset-0 z-50 hidden">
+    <div id="stats-backdrop" class="absolute inset-0 bg-slate-900/30"></div>
+    <aside class="absolute right-0 top-0 bottom-0 w-full sm:w-[420px] bg-white border-l border-[var(--line)] p-6 overflow-y-auto">
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="display text-2xl text-slate-900">Статистика датасета</h3>
+        <button id="stats-close" type="button" class="w-8 h-8 rounded-lg hover:bg-slate-100 cursor-pointer inline-flex items-center justify-center" aria-label="Закрыть">
+          <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
       </div>
-      <div class="p-6">
-        <div class="flex items-baseline justify-between gap-4">
-          <h3 id="target-title" class="display text-3xl text-slate-900">Вставьте ссылку на квартиру</h3>
-          <div id="target-price" class="display num text-3xl text-slate-900 whitespace-nowrap">— ₽</div>
+      <div class="space-y-4">
+        <div class="tile p-4">
+          <div class="eyebrow">Средняя цена м²</div>
+          <div id="hero-ppm" class="display num text-3xl mt-1 text-slate-900">—</div>
         </div>
-        <p id="target-url" class="mt-2 text-sm text-slate-500 truncate">после анализа здесь появятся параметры выбранного объявления</p>
-        <div id="target-pills" class="mt-5 flex flex-wrap gap-2">
-          <span class="pill h-7 px-3 rounded-full text-xs text-slate-500">— м²</span>
-          <span class="pill h-7 px-3 rounded-full text-xs text-slate-500">— / — этаж</span>
-          <span class="pill h-7 px-3 rounded-full text-xs text-slate-500">— ₽/м²</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Right column: filters -->
-    <div class="col-span-12 lg:col-span-5 grid gap-4">
-      <!-- Filter tile -->
-      <div class="tile p-5">
-        <div class="flex items-center justify-between">
-          <h4 class="text-sm font-medium text-slate-700">Фильтры</h4>
-          <button id="filters-reset" type="button" class="text-xs text-slate-500 hover:text-slate-900 cursor-pointer transition-colors duration-200">Сбросить</button>
-        </div>
-        <div class="mt-4 space-y-4">
-          <div>
-            <div class="flex items-baseline justify-between text-xs text-slate-500 mb-1.5">
-              <span>Цена, млн ₽</span>
-              <span class="text-slate-700"><span id="price-min-label">5</span> — <span id="price-max-label">25</span></span>
-            </div>
-            <div id="price-range" class="range-wrap">
-              <div class="range-track"></div>
-              <div id="price-fill" class="range-fill" style="left:5%;right:75%"></div>
-              <input id="price-min" type="range" min="0" max="100" step="0.5" value="5" aria-label="Минимальная цена" />
-              <input id="price-max" type="range" min="0" max="100" step="0.5" value="25" aria-label="Максимальная цена" />
-            </div>
-          </div>
-          <div class="flex flex-wrap gap-2 items-center">
-            <span class="text-xs text-slate-500 w-full">Комнат</span>
-            <button type="button" data-rooms="1" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">1</button>
-            <button type="button" data-rooms="2" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">2</button>
-            <button type="button" data-rooms="3" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">3</button>
-            <button type="button" data-rooms="4" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">4+</button>
-          </div>
-          <p id="filter-meta" class="text-[11px] text-slate-500">Фильтры применяются к найденным похожим объявлениям.</p>
+        <div class="tile p-4">
+          <div class="text-[11px] uppercase tracking-wider text-slate-500">Типичная цена квартиры</div>
+          <div id="hero-median-price" class="display num text-3xl mt-1 text-slate-900">—</div>
+          <svg viewBox="0 0 320 80" class="mt-3 w-full h-20" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stop-color="#0F172A" stop-opacity="0.18"/>
+                <stop offset="100%" stop-color="#0F172A" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path d="M0,55 L26,50 52,52 78,44 104,46 130,38 156,40 182,30 208,34 234,24 260,28 286,18 312,22 320,20 L320,80 0,80 Z" fill="url(#g1)"/>
+            <path d="M0,55 L26,50 52,52 78,44 104,46 130,38 156,40 182,30 208,34 234,24 260,28 286,18 312,22 320,20" fill="none" stroke="#0F172A" stroke-width="1.5"/>
+          </svg>
         </div>
       </div>
-    </div>
-  </section>
+    </aside>
+  </div>
 
   <!-- Listings (вкладки: Все / Похожие) -->
   <section class="mt-6">
@@ -302,40 +271,6 @@
     </div>
   </section>
 
-  <!-- Bottom bento: validation + cta -->
-  <section class="mt-6 grid grid-cols-12 gap-4">
-    <div class="col-span-12 lg:col-span-8 tile p-6">
-      <div class="flex items-center justify-between">
-        <h3 class="display text-2xl text-slate-900">Как мы помогаем</h3>
-      </div>
-      <p class="mt-2 text-sm text-slate-600 max-w-xl">Вставьте ссылку на объявление — за пару секунд покажем, не выбивается ли цена, и подберём похожие квартиры для сравнения.</p>
-      <ul class="mt-5 grid sm:grid-cols-2 gap-x-6 gap-y-2.5 text-sm">
-        <li class="flex items-center gap-2 text-slate-700">
-          <svg viewBox="0 0 24 24" class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-          Сравним с похожими по описанию
-        </li>
-        <li class="flex items-center gap-2 text-slate-700">
-          <svg viewBox="0 0 24 24" class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-          Покажем цену за квадратный метр
-        </li>
-        <li class="flex items-center gap-2 text-slate-700">
-          <svg viewBox="0 0 24 24" class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-          Краткий разбор от помощника
-        </li>
-      </ul>
-    </div>
-
-    <div class="col-span-12 lg:col-span-4 tile p-6 flex flex-col justify-between bg-slate-900 text-white border-slate-900">
-      <div>
-        <p class="text-xs uppercase tracking-[0.18em] text-slate-400">Для агентов</p>
-        <h3 class="display text-3xl mt-3 leading-tight">Размещайте<br/>без визуального шума.</h3>
-        <p class="mt-3 text-sm text-slate-300 max-w-sm">Чистая карточка, понятные характеристики, проверка схемой ещё до публикации.</p>
-      </div>
-      <button class="mt-6 h-11 px-5 rounded-xl bg-white text-slate-900 text-sm font-medium hover:bg-slate-100 transition-colors duration-200 cursor-pointer ring-focus self-start">
-        Разместить объявление
-      </button>
-    </div>
-  </section>
 </main>
 
 <script>
@@ -346,6 +281,17 @@
   const fmtMln = (n) => n == null ? "—" : `${(n/1_000_000).toFixed(1)} млн ₽`;
   const fmtPpm = (n) => n == null ? "—" : `${Math.round(n/1000)}k ₽/м²`;
   const fmtArea = (n) => n == null ? "—" : `${Number(n).toLocaleString('ru-RU')} м²`;
+
+  // Заголовок объявления формируем из первой осмысленной фразы описания —
+  // у Cian оно почти всегда начинается со строки вида "2-комн. квартира в ЖК ...".
+  function titleFromDescription(desc) {
+    if (!desc) return '';
+    const flat = String(desc).replace(/\s+/g, ' ').trim();
+    if (!flat) return '';
+    const cut = flat.split(/(?<=[.!?\n])\s+|[•|·]|\s—\s/u)[0] || flat;
+    const trimmed = cut.length > 110 ? cut.slice(0, 107).replace(/[\s,;:.]+$/, '') + '…' : cut;
+    return trimmed.replace(/</g, '&lt;');
+  }
 
   // ---- Filters state (client-side, applied to alternatives) ----
   const filters = {
@@ -481,9 +427,9 @@
       $('hero-median-price').textContent = fmtMln(s.median_price_rub);
       const total = s.total || 0;
       const clean = s.clean || 0;
-      $('hero-validity').textContent = total ? `${(100*clean/total).toFixed(1)}%` : '—';
+      $('hero-validity').textContent = total ? clean.toLocaleString('ru-RU') : '—';
       $('hero-count-line').textContent = total
-        ? `Cian · ${clean.toLocaleString('ru-RU')} чистых · ${(s.anomalies || 0).toLocaleString('ru-RU')} аномалий`
+        ? `Cian · ${(100*clean/total).toFixed(1)}% валидны · ${(s.anomalies || 0).toLocaleString('ru-RU')} аномалий`
         : 'Cian · датасет пуст';
     } catch (e) {
       console.warn('stats failed', e);
@@ -497,6 +443,7 @@
   const btn = $('submit-btn');
   const err = $('form-error');
   const targetCard = $('target-card');
+  const targetSection = $('target-section');
   const altGrid = $('alternatives');
   const altMeta = $('alt-meta');
   const reportSection = $('report-section');
@@ -574,7 +521,7 @@
     mode = next;
     tabAll.classList.toggle('active', mode === 'all');
     tabSimilar.classList.toggle('active', mode === 'similar');
-    targetCard.classList.toggle('hidden', mode === 'all');
+    if (targetSection) targetSection.classList.toggle('hidden', mode === 'all' || !targetCard.dataset.filled);
     rerender();
   }
 
@@ -755,7 +702,7 @@
       ${galleryHTML(images, dot, label)}
       <div class="p-6">
         <div class="flex items-baseline justify-between gap-4">
-          <h3 class="display text-3xl text-slate-900">Объявление ${t.listing_id ?? ''}</h3>
+          <h3 class="display text-3xl text-slate-900">${titleFromDescription(t.description) || ('Объявление ' + (t.listing_id ?? ''))}</h3>
           <div class="display text-3xl text-slate-900 whitespace-nowrap">${fmtMln(t.price_rub)}</div>
         </div>
         <a href="${t.url}" target="_blank" rel="noopener" class="mt-2 text-sm text-slate-500 hover:text-slate-900 transition-colors duration-200 truncate block">${t.url ?? ''}</a>
@@ -768,6 +715,8 @@
       </div>`;
 
     attachGallery(targetCard.querySelector('[data-gallery]'), images);
+    targetCard.dataset.filled = '1';
+    if (targetSection) targetSection.classList.remove('hidden');
 
     // If analyze didn't return images (dataset path or empty scrape), backfill them async.
     if (!images.length) {
@@ -832,6 +781,15 @@
   fetchListingsPage(true);
 
   loadStats();
+
+  // ---- Stats drawer ----
+  const drawer = $('stats-drawer');
+  const openDrawer = () => drawer.classList.remove('hidden');
+  const closeDrawer = () => drawer.classList.add('hidden');
+  $('stats-toggle').addEventListener('click', openDrawer);
+  $('stats-close').addEventListener('click', closeDrawer);
+  $('stats-backdrop').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
 })();
 </script>
 

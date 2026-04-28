@@ -7,6 +7,8 @@ import pandas as pd
 import pandera.pandas as pa
 from pandera.errors import SchemaErrors
 
+from cian_scraper import is_listing_photo_url
+
 _DATASET_SCHEMA = pa.DataFrameSchema(
     {
         "url": pa.Column(
@@ -116,7 +118,12 @@ def records_to_frame(records: List[Dict[str, Any]]) -> pd.DataFrame:
         if not isinstance(structured, dict):
             raise ValueError("В успешной записи отсутствует объект `structured`.")
         images = record.get("images") or []
-        first_image = images[0] if isinstance(images, list) and images else None
+        first_image = None
+        if isinstance(images, list):
+            for candidate in images:
+                if is_listing_photo_url(candidate):
+                    first_image = candidate
+                    break
         rows.append(
             {
                 "url": record.get("url"),
