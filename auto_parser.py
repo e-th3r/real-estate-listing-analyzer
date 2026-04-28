@@ -2,7 +2,8 @@
 import json
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -18,17 +19,48 @@ def analyze_cian_listing(url: str) -> Dict[str, Any]:
     return data
 
 
-def analyze_many(urls: Iterable[str], *, max_workers: int = 8) -> List[Tuple[str, Dict[str, Any], str]]:
+def analyze_many(
+    urls: Iterable[str],
+    *,
+    max_workers: int = 8,
+    per_url_timeout: float = 60.0,
+    progress_every: int = 10,
+) -> List[Tuple[str, Dict[str, Any], str]]:
+    url_list = list(urls)
+    total = len(url_list)
     results: List[Tuple[str, Dict[str, Any], str]] = []
+    done = 0
+    ok = 0
+    err = 0
+    start = time.monotonic()
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_url = {executor.submit(analyze_cian_listing, url): url for url in urls}
+        future_to_url = {executor.submit(analyze_cian_listing, url): url for url in url_list}
         for future in as_completed(future_to_url):
             url = future_to_url[future]
             try:
-                data = future.result()
+                data = future.result(timeout=per_url_timeout)
                 results.append((url, data, ""))
+                ok += 1
+            except FutureTimeoutError:
+                future.cancel()
+                results.append((url, {}, f"timeout>{per_url_timeout}s"))
+                err += 1
             except Exception as exc:  # noqa: BLE001
                 results.append((url, {}, str(exc)))
+                err += 1
+
+            done += 1
+            if done % progress_every == 0 or done == total:
+                elapsed = time.monotonic() - start
+                rate = done / elapsed if elapsed > 0 else 0.0
+                eta = (total - done) / rate if rate > 0 else 0.0
+                print(
+                    f"[analyze_many] {done}/{total} (ok={ok}, err={err}) "
+                    f"elapsed={elapsed:.0f}s eta={eta:.0f}s",
+                    file=sys.stderr,
+                    flush=True,
+                )
     return results
 
 
@@ -217,6 +249,12 @@ def main() -> None:
         help="Сколько батчей подряд без новых URL допускается перед ранним выходом (по умолчанию 2)",
     )
     parser.add_argument(
+        "--per-url-timeout",
+        type=float,
+        default=60.0,
+        help="Максимальное время на обогащение одного URL в секундах (по умолчанию 60)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="РўРѕР»СЊРєРѕ СЃРѕР±СЂР°С‚СЊ URL Рё РЅР°РїРµС‡Р°С‚Р°С‚СЊ РёС…, Р±РµР· РѕР±РѕРіР°С‰РµРЅРёСЏ Рё DVC",
@@ -245,7 +283,11 @@ def main() -> None:
         print("[auto_parser] РќРµС‚ URL РґР»СЏ РѕР±РѕРіР°С‰РµРЅРёСЏ, РІС‹С…РѕР¶Сѓ.")
         return
 
-    batch_results = analyze_many(urls, max_workers=args.max_workers)
+    batch_results = analyze_many(
+        urls,
+        max_workers=args.max_workers,
+        per_url_timeout=args.per_url_timeout,
+    )
 
     output: List[Dict[str, Any]] = []
     ok_count = 0

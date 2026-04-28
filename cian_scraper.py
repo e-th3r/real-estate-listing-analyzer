@@ -737,15 +737,40 @@ def _extract_offer_id(offer: Dict[str, Any]) -> Optional[int]:
     return None
 
 
-def _request_offer_candidates(listing_id: int, *, timeout: int) -> List[Dict[str, Any]]:
-    ad_types = [
-        "flatsale",
-        "flatrent",
-        "suburbansale",
-        "suburbanrent",
-        "commercialsale",
-        "commercialrent",
-    ]
+_AD_TYPE_HINTS = [
+    ("/sale/flat/", "flatsale"),
+    ("/rent/flat/", "flatrent"),
+    ("/sale/suburban/", "suburbansale"),
+    ("/rent/suburban/", "suburbanrent"),
+    ("/sale/commercial/", "commercialsale"),
+    ("/rent/commercial/", "commercialrent"),
+    ("/kupit-kvartiru/", "flatsale"),
+    ("/snyat-kvartiru/", "flatrent"),
+]
+
+_ALL_AD_TYPES = [
+    "flatsale",
+    "flatrent",
+    "suburbansale",
+    "suburbanrent",
+    "commercialsale",
+    "commercialrent",
+]
+
+
+def _guess_ad_types(url: str) -> List[str]:
+    lower = url.lower()
+    for hint, ad_type in _AD_TYPE_HINTS:
+        if hint in lower:
+            others = [t for t in _ALL_AD_TYPES if t != ad_type]
+            return [ad_type, *others]
+    return list(_ALL_AD_TYPES)
+
+
+def _request_offer_candidates(
+    listing_id: int, *, timeout: int, url: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    ad_types = _guess_ad_types(url) if url else list(_ALL_AD_TYPES)
     regions = [1, 2]
     id_filters = [
         {"offerId": {"type": "term", "value": listing_id}},
@@ -849,7 +874,7 @@ def scrape_cian_listing_via_cianpython(url: str, *, timeout: int = 20) -> Dict[s
     api_err: Optional[Exception] = None
     selected_offer: Optional[Dict[str, Any]] = None
     try:
-        offers = _request_offer_candidates(listing_id, timeout=timeout)
+        offers = _request_offer_candidates(listing_id, timeout=timeout, url=url)
         for offer in offers:
             if _extract_offer_id(offer) == listing_id:
                 selected_offer = offer
