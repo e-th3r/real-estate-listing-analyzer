@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Listings — Real Estate Marketplace</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F6F6F4; --surface:#FFFFFF; --ink:#0F172A; --muted:#475569;
+    --line:#ECECE8; --accent:#0F172A; --pill:#F1F1EE;
+  }
+  html,body{
+    background:var(--bg);color:var(--ink);
+    font-family:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;
+    font-feature-settings:'cv11','ss01','ss03','cv02','cv03','cv04';
+    text-rendering:optimizeLegibility;
+    -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+  }
+  /* Display style — Inter at heavier weight with tight tracking, replacing the previous serif treatment */
+  .display{
+    font-family:'Inter',ui-sans-serif,system-ui,sans-serif;
+    font-weight:600;
+    letter-spacing:-0.025em;
+    font-feature-settings:'cv11','ss01','ss03','cv02','cv03','cv04','ss02';
+    line-height:1.05;
+  }
+  .display-xl{letter-spacing:-0.035em;font-weight:700;}
+  /* Tabular figures for prices, metrics, anything compared visually */
+  .num,.num *{font-variant-numeric:tabular-nums;font-feature-settings:'tnum','cv11','ss01';}
+  /* Eyebrow / micro-label */
+  .eyebrow{
+    font-size:11px;line-height:1;font-weight:500;
+    text-transform:uppercase;letter-spacing:0.14em;
+    color:#64748B; /* slate-500 */
+  }
+  .tile{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:1.25rem;
+    box-shadow:0 1px 0 rgba(15,23,42,0.02), 0 6px 20px -12px rgba(15,23,42,0.10);
+    transition:box-shadow .2s ease, border-color .2s ease, transform .2s ease;
+  }
+  .tile-hover:hover{
+    box-shadow:0 1px 0 rgba(15,23,42,0.02), 0 14px 32px -16px rgba(15,23,42,0.18);
+    border-color:#DCDCD6;
+  }
+  .ring-focus:focus{outline:none;box-shadow:0 0 0 2px #0F172A;}
+  .pill{background:var(--pill);}
+  .grid-photo{
+    background:
+      radial-gradient(120% 80% at 0% 0%, #E8E5DD 0%, transparent 50%),
+      radial-gradient(100% 80% at 100% 100%, #D9D6CD 0%, transparent 55%),
+      linear-gradient(135deg,#EFECE4 0%,#E2DFD6 100%);
+  }
+  .skeleton-line{background:linear-gradient(90deg,#EFEDE7 0%,#F6F4EE 50%,#EFEDE7 100%);background-size:200% 100%;animation:sk 1.4s linear infinite;}
+  @keyframes sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+  @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+  /* Dual-range slider — two stacked native range inputs */
+  .range-wrap{position:relative;height:24px;}
+  .range-track{position:absolute;top:11px;left:0;right:0;height:4px;border-radius:9999px;background:#E2E8F0;}
+  .range-fill{position:absolute;top:11px;height:4px;border-radius:9999px;background:#0F172A;}
+  .range-wrap input[type=range]{
+    position:absolute;top:0;left:0;width:100%;height:24px;
+    -webkit-appearance:none;appearance:none;background:transparent;pointer-events:none;margin:0;
+  }
+  .range-wrap input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:9999px;
+    background:#fff;border:1.5px solid #0F172A;cursor:pointer;pointer-events:auto;margin-top:0;
+    box-shadow:0 1px 2px rgba(15,23,42,0.18);
+  }
+  .range-wrap input[type=range]::-moz-range-thumb{
+    width:16px;height:16px;border-radius:9999px;background:#fff;border:1.5px solid #0F172A;cursor:pointer;pointer-events:auto;
+    box-shadow:0 1px 2px rgba(15,23,42,0.18);
+  }
+  .range-wrap input[type=range]::-moz-range-track{background:transparent;border:none;}
+
+  /* Active filter button state */
+  .room-btn.active{background:#0F172A;color:#fff;}
+  .pill.active{background:#0F172A;color:#fff;}
+
+  /* Tabs */
+  .tab-btn{color:#64748B;border-bottom:2px solid transparent;transition:color .2s,border-color .2s;}
+  .tab-btn.active{color:#0F172A;border-bottom-color:#0F172A;}
+
+  /* Highlight для "похожих" карточек в общей сетке */
+  .alt-similar{position:relative;box-shadow:0 0 0 2px #0F172A, 0 14px 32px -16px rgba(15,23,42,0.18);}
+</style>
+</head>
+<body class="min-h-screen antialiased">
+
+<!-- Floating navbar -->
+<header class="fixed top-4 left-4 right-4 z-40">
+  <div class="max-w-7xl mx-auto tile px-4 sm:px-5 h-14 flex items-center justify-between backdrop-blur bg-white/85">
+    <div class="flex items-center gap-2.5">
+      <span class="inline-flex w-7 h-7 rounded-lg bg-slate-900 text-white items-center justify-center">
+        <svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/></svg>
+      </span>
+      <span class="font-semibold tracking-tight">Kvartal</span>
+      <span class="hidden sm:inline text-xs text-slate-500 ml-1">· недвижимость</span>
+    </div>
+    <nav class="hidden md:flex items-center gap-7 text-sm text-slate-600">
+      <a href="#" class="hover:text-slate-900 transition-colors duration-200">Купить</a>
+      <a href="#" class="hover:text-slate-900 transition-colors duration-200">Аренда</a>
+      <a href="#" class="hover:text-slate-900 transition-colors duration-200">Новостройки</a>
+    </nav>
+    <div class="flex items-center gap-2">
+      <button class="hidden sm:inline-flex h-9 px-3 rounded-lg text-sm text-slate-700 hover:bg-slate-100 transition-colors duration-200 cursor-pointer ring-focus">Войти</button>
+      <button class="h-9 px-3.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors duration-200 cursor-pointer ring-focus">
+        Разместить
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 sm:px-6 pt-24 pb-24">
+
+  <!-- Compact hero: search + dataset count -->
+  <section class="tile p-5 sm:p-6">
+    <div class="grid grid-cols-12 gap-4 items-center">
+      <div class="col-span-12 lg:col-span-8">
+        <h1 class="display text-2xl sm:text-3xl text-slate-900">Узнайте честную цену квартиры.</h1>
+        <form id="analyze-form" class="mt-3 flex flex-col sm:flex-row gap-2">
+          <div class="flex-1 flex items-center gap-2 h-11 px-3.5 rounded-xl border border-gray-200 bg-white">
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <label for="q" class="sr-only">Ссылка Cian</label>
+            <input id="q" name="url" type="url" required
+                   placeholder="https://www.cian.ru/sale/flat/328442756/"
+                   class="flex-1 bg-transparent outline-none text-slate-900 placeholder:text-slate-400" />
+          </div>
+          <label for="report" class="h-11 px-3 rounded-xl border border-gray-200 bg-white text-sm text-slate-700 inline-flex items-center gap-2 cursor-pointer">
+            <input id="report" name="report" type="checkbox" class="accent-slate-900" />
+            LLM-отчёт
+          </label>
+          <button id="submit-btn" type="submit" class="h-11 px-5 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors duration-200 cursor-pointer ring-focus disabled:opacity-60 disabled:cursor-not-allowed">
+            Анализировать
+          </button>
+        </form>
+        <p id="form-error" class="hidden mt-2 text-sm text-red-600" role="alert"></p>
+      </div>
+
+      <div class="col-span-12 lg:col-span-4 lg:border-l lg:border-[var(--line)] lg:pl-5">
+        <div class="text-[11px] uppercase tracking-wider text-slate-500">Объявлений в базе</div>
+        <div class="flex items-baseline gap-3 mt-1">
+          <div id="hero-validity" class="display num text-3xl text-slate-900">—</div>
+          <button id="stats-toggle" type="button" class="text-xs text-slate-500 hover:text-slate-900 cursor-pointer transition-colors duration-200 inline-flex items-center gap-1">
+            Статистика
+            <svg viewBox="0 0 24 24" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+        <div id="hero-count-line" class="text-[11px] text-slate-500 mt-1 truncate">Загружаем актуальные цены…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Target listing (hidden until analysis) -->
+  <section id="target-section" class="mt-4 hidden">
+    <div id="target-card" class="tile overflow-hidden"></div>
+  </section>
+
+  <!-- Filter bar -->
+  <section class="mt-4 tile p-3 sm:p-4">
+    <div class="flex flex-wrap items-center gap-3">
+      <div class="flex flex-wrap gap-1.5">
+        <button type="button" data-rooms="1" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">1</button>
+        <button type="button" data-rooms="2" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">2</button>
+        <button type="button" data-rooms="3" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">3</button>
+        <button type="button" data-rooms="4" class="room-btn pill h-8 w-9 rounded-lg text-xs text-slate-700 cursor-pointer">4+</button>
+      </div>
+
+      <div class="flex-1 min-w-[200px] max-w-md flex items-center gap-3">
+        <span class="text-xs text-slate-500 whitespace-nowrap">Цена, млн ₽</span>
+        <div id="price-range" class="range-wrap flex-1">
+          <div class="range-track"></div>
+          <div id="price-fill" class="range-fill" style="left:5%;right:75%"></div>
+          <input id="price-min" type="range" min="0" max="100" step="0.5" value="5" aria-label="Минимальная цена" />
+          <input id="price-max" type="range" min="0" max="100" step="0.5" value="25" aria-label="Максимальная цена" />
+        </div>
+        <span class="text-xs text-slate-700 whitespace-nowrap num"><span id="price-min-label">5</span>–<span id="price-max-label">25</span></span>
+      </div>
+
+      <div class="flex flex-wrap gap-1.5">
+        <button type="button" data-quick="material:кирпич" class="pill quick-pill h-8 px-3 rounded-full text-xs text-slate-700 hover:bg-slate-200 transition-colors duration-200 cursor-pointer">Кирпич</button>
+        <button type="button" data-quick="not-first-floor" class="pill quick-pill h-8 px-3 rounded-full text-xs text-slate-700 hover:bg-slate-200 transition-colors duration-200 cursor-pointer">Не первый этаж</button>
+      </div>
+
+      <button id="filters-reset" type="button" class="ml-auto text-xs text-slate-500 hover:text-slate-900 cursor-pointer transition-colors duration-200">Сбросить</button>
+    </div>
+    <p id="filter-meta" class="hidden text-[11px] text-slate-500 mt-2">Фильтры применяются к найденным похожим объявлениям.</p>
+  </section>
+
+  <!-- Stats drawer -->
+  <div id="stats-drawer" class="fixed inset-0 z-50 hidden">
+    <div id="stats-backdrop" class="absolute inset-0 bg-slate-900/30"></div>
+    <aside class="absolute right-0 top-0 bottom-0 w-full sm:w-[420px] bg-white border-l border-[var(--line)] p-6 overflow-y-auto">
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="display text-2xl text-slate-900">Статистика датасета</h3>
+        <button id="stats-close" type="button" class="w-8 h-8 rounded-lg hover:bg-slate-100 cursor-pointer inline-flex items-center justify-center" aria-label="Закрыть">
+          <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="space-y-4">
+        <div class="tile p-4">
+          <div class="eyebrow">Средняя цена м²</div>
+          <div id="hero-ppm" class="display num text-3xl mt-1 text-slate-900">—</div>
+        </div>
+        <div class="tile p-4">
+          <div class="text-[11px] uppercase tracking-wider text-slate-500">Типичная цена квартиры</div>
+          <div id="hero-median-price" class="display num text-3xl mt-1 text-slate-900">—</div>
+          <svg viewBox="0 0 320 80" class="mt-3 w-full h-20" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stop-color="#0F172A" stop-opacity="0.18"/>
+                <stop offset="100%" stop-color="#0F172A" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path d="M0,55 L26,50 52,52 78,44 104,46 130,38 156,40 182,30 208,34 234,24 260,28 286,18 312,22 320,20 L320,80 0,80 Z" fill="url(#g1)"/>
+            <path d="M0,55 L26,50 52,52 78,44 104,46 130,38 156,40 182,30 208,34 234,24 260,28 286,18 312,22 320,20" fill="none" stroke="#0F172A" stroke-width="1.5"/>
+          </svg>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Listings (вкладки: Все / Похожие) -->
+  <section class="mt-6">
+    <div class="flex flex-wrap items-end justify-between gap-3 mb-4 border-b border-[var(--line)]">
+      <div class="flex items-center gap-6">
+        <button id="tab-all" type="button" class="tab-btn display text-2xl pb-2 cursor-pointer">Все квартиры</button>
+        <button id="tab-similar" type="button" class="tab-btn display text-2xl pb-2 cursor-pointer" disabled>Похожие</button>
+      </div>
+      <div class="flex items-center gap-3 pb-3">
+        <label id="sort-wrap" class="text-xs text-slate-500 inline-flex items-center gap-2">
+          Сортировка
+          <select id="sort-select" class="h-8 px-2 rounded-lg border border-gray-200 bg-white text-xs text-slate-700 cursor-pointer">
+            <option value="recent">по умолчанию</option>
+            <option value="price_asc">цена ↑</option>
+            <option value="price_desc">цена ↓</option>
+            <option value="ppm_asc">₽/м² ↑</option>
+            <option value="ppm_desc">₽/м² ↓</option>
+          </select>
+        </label>
+        <span id="alt-meta" class="text-sm text-slate-500">загружаем квартиры…</span>
+      </div>
+    </div>
+    <div id="alternatives" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="tile overflow-hidden"><div class="aspect-[4/3] skeleton-line"></div><div class="p-4 space-y-2"><div class="h-5 w-3/5 rounded skeleton-line"></div><div class="h-4 w-2/5 rounded skeleton-line"></div><div class="h-3 w-1/2 rounded skeleton-line"></div></div></div>
+      <div class="tile overflow-hidden"><div class="aspect-[4/3] skeleton-line"></div><div class="p-4 space-y-2"><div class="h-5 w-3/5 rounded skeleton-line"></div><div class="h-4 w-2/5 rounded skeleton-line"></div><div class="h-3 w-1/2 rounded skeleton-line"></div></div></div>
+      <div class="tile overflow-hidden"><div class="aspect-[4/3] skeleton-line"></div><div class="p-4 space-y-2"><div class="h-5 w-3/5 rounded skeleton-line"></div><div class="h-4 w-2/5 rounded skeleton-line"></div><div class="h-3 w-1/2 rounded skeleton-line"></div></div></div>
+      <div class="tile overflow-hidden"><div class="aspect-[4/3] skeleton-line"></div><div class="p-4 space-y-2"><div class="h-5 w-3/5 rounded skeleton-line"></div><div class="h-4 w-2/5 rounded skeleton-line"></div><div class="h-3 w-1/2 rounded skeleton-line"></div></div></div>
+    </div>
+    <div class="mt-5 flex justify-center">
+      <button id="load-more" type="button" class="hidden h-10 px-5 rounded-xl border border-gray-200 bg-white text-sm text-slate-700 hover:bg-slate-50 transition-colors duration-200 cursor-pointer ring-focus">
+        Показать ещё
+      </button>
+    </div>
+  </section>
+
+  <!-- LLM report -->
+  <section id="report-section" class="mt-6 hidden">
+    <div class="tile p-6">
+      <div class="flex items-baseline justify-between mb-4">
+        <h2 class="display text-2xl text-slate-900">Отчёт LLM</h2>
+        <span id="report-meta" class="text-xs text-slate-500"></span>
+      </div>
+      <div id="report-body" class="prose prose-slate max-w-none text-[15px] leading-relaxed whitespace-pre-line text-slate-700"></div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(() => {
+  const API = (path) => path; // same-origin
+  const $ = (id) => document.getElementById(id);
+
+  const fmtMln = (n) => n == null ? "—" : `${(n/1_000_000).toFixed(1)} млн ₽`;
+  const fmtPpm = (n) => n == null ? "—" : `${Math.round(n/1000)}k ₽/м²`;
+  const fmtArea = (n) => n == null ? "—" : `${Number(n).toLocaleString('ru-RU')} м²`;
+
+  // Заголовок объявления формируем из первой осмысленной фразы описания —
+  // у Cian оно почти всегда начинается со строки вида "2-комн. квартира в ЖК ...".
+  function titleFromDescription(desc) {
+    if (!desc) return '';
+    const flat = String(desc).replace(/\s+/g, ' ').trim();
+    if (!flat) return '';
+    const cut = flat.split(/(?<=[.!?\n])\s+|[•|·]|\s—\s/u)[0] || flat;
+    const trimmed = cut.length > 110 ? cut.slice(0, 107).replace(/[\s,;:.]+$/, '') + '…' : cut;
+    return trimmed.replace(/</g, '&lt;');
+  }
+
+  // ---- Filters state (client-side, applied to alternatives) ----
+  const filters = {
+    priceMinM: 0,           // millions ₽
+    priceMaxM: Infinity,
+    rooms: new Set(),       // numbers; 4 means "4+"
+    requireBrick: false,
+    notFirstFloor: false,
+  };
+  let allAlternatives = [];
+
+  function inferRooms(item){
+    // Best effort: extract "N-комн" / "N к" / studio from snippet.
+    const text = (item.snippet || '').toLowerCase();
+    if (/студи/.test(text)) return 0;
+    const m = text.match(/(\d+)\s*-?\s*комн/);
+    if (m) return parseInt(m[1], 10);
+    return null;
+  }
+
+  function passesFilters(a){
+    const priceM = a.price_rub != null ? a.price_rub / 1_000_000 : null;
+    if (priceM != null){
+      if (priceM < filters.priceMinM) return false;
+      if (priceM > filters.priceMaxM) return false;
+    }
+    if (filters.rooms.size){
+      const r = inferRooms(a);
+      if (r == null) return false;
+      const matches = [...filters.rooms].some(want => want === 4 ? r >= 4 : r === want);
+      if (!matches) return false;
+    }
+    if (filters.requireBrick){
+      if (!/кирпич/i.test(a.snippet || '')) return false;
+    }
+    if (filters.notFirstFloor){
+      if (a.floor != null && a.floor === 1) return false;
+    }
+    return true;
+  }
+
+  function applyFilters(){
+    const filtered = allAlternatives.filter(passesFilters);
+    renderAlternatives(filtered);
+    if (allAlternatives.length){
+      $('filter-meta').textContent = `${filtered.length} из ${allAlternatives.length} прошли фильтры.`;
+    }
+  }
+
+  // ---- Dual price slider ----
+  const minInput = $('price-min');
+  const maxInput = $('price-max');
+  const fill = $('price-fill');
+  const minLabel = $('price-min-label');
+  const maxLabel = $('price-max-label');
+  const SLIDER_MAX = parseFloat(maxInput.max);
+
+  function syncSlider(){
+    let lo = parseFloat(minInput.value);
+    let hi = parseFloat(maxInput.value);
+    if (lo > hi - 0.5){
+      // Push the other thumb out of the way without crossing
+      if (document.activeElement === minInput) { hi = Math.min(SLIDER_MAX, lo + 0.5); maxInput.value = hi; }
+      else { lo = Math.max(0, hi - 0.5); minInput.value = lo; }
+    }
+    const lp = (lo / SLIDER_MAX) * 100;
+    const rp = 100 - (hi / SLIDER_MAX) * 100;
+    fill.style.left = `${lp}%`;
+    fill.style.right = `${rp}%`;
+    minLabel.textContent = lo;
+    maxLabel.textContent = hi >= SLIDER_MAX ? `${SLIDER_MAX}+` : hi;
+    filters.priceMinM = lo;
+    filters.priceMaxM = hi >= SLIDER_MAX ? Infinity : hi;
+  }
+  minInput.addEventListener('input', () => { syncSlider(); applyFilters(); });
+  maxInput.addEventListener('input', () => { syncSlider(); applyFilters(); });
+  syncSlider();
+
+  // ---- Room buttons ----
+  document.querySelectorAll('.room-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const r = parseInt(btn.dataset.rooms, 10);
+      if (filters.rooms.has(r)) { filters.rooms.delete(r); btn.classList.remove('active'); }
+      else { filters.rooms.add(r); btn.classList.add('active'); }
+      applyFilters();
+    });
+  });
+
+  // ---- Quick pills (above the search bar) ----
+  document.querySelectorAll('.quick-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      const action = pill.dataset.quick;
+      const active = pill.classList.toggle('active');
+      if (action.startsWith('rooms:')){
+        const r = parseInt(action.split(':')[1], 10);
+        const target = document.querySelector(`.room-btn[data-rooms="${r}"]`);
+        if (target) target.click();
+        // The room button toggles its own state; sync the pill to it.
+        pill.classList.toggle('active', filters.rooms.has(r));
+      } else if (action === 'price-max:15'){
+        if (active){
+          maxInput.value = 15;
+          if (parseFloat(minInput.value) > 14.5) minInput.value = 0;
+        } else {
+          maxInput.value = SLIDER_MAX;
+        }
+        syncSlider(); applyFilters();
+      } else if (action === 'material:кирпич'){
+        filters.requireBrick = active; applyFilters();
+      } else if (action === 'not-first-floor'){
+        filters.notFirstFloor = active; applyFilters();
+      }
+    });
+  });
+
+  // ---- Reset ----
+  $('filters-reset').addEventListener('click', () => {
+    minInput.value = 0; maxInput.value = SLIDER_MAX;
+    filters.rooms.clear();
+    filters.requireBrick = false;
+    filters.notFirstFloor = false;
+    document.querySelectorAll('.room-btn.active, .quick-pill.active').forEach(b => b.classList.remove('active'));
+    syncSlider(); applyFilters();
+  });
+
+  // ---- Stats ----
+  async function loadStats(){
+    try {
+      const r = await fetch(API('/api/stats'));
+      if (!r.ok) throw new Error(r.statusText);
+      const s = await r.json();
+      $('hero-ppm').textContent = s.median_price_per_m2 ? `${Math.round(s.median_price_per_m2/1000)}k` : '—';
+      $('hero-median-price').textContent = fmtMln(s.median_price_rub);
+      const total = s.total || 0;
+      const clean = s.clean || 0;
+      $('hero-validity').textContent = total ? clean.toLocaleString('ru-RU') : '—';
+      $('hero-count-line').textContent = total
+        ? `Cian · ${(100*clean/total).toFixed(1)}% валидны · ${(s.anomalies || 0).toLocaleString('ru-RU')} аномалий`
+        : 'Cian · датасет пуст';
+    } catch (e) {
+      console.warn('stats failed', e);
+      $('hero-count-line').textContent = 'Cian · статистика недоступна';
+    }
+  }
+
+  // ---- Analyze ----
+  const form = $('analyze-form');
+  const input = $('q');
+  const btn = $('submit-btn');
+  const err = $('form-error');
+  const targetCard = $('target-card');
+  const targetSection = $('target-section');
+  const altGrid = $('alternatives');
+  const altMeta = $('alt-meta');
+  const reportSection = $('report-section');
+
+  const altSkeleton = () => {
+    altGrid.innerHTML = Array.from({length:4}).map(() =>
+      `<div class="tile overflow-hidden"><div class="aspect-[4/3] skeleton-line"></div><div class="p-4 space-y-2"><div class="h-5 w-3/5 rounded skeleton-line"></div><div class="h-4 w-2/5 rounded skeleton-line"></div><div class="h-3 w-1/2 rounded skeleton-line"></div></div></div>`
+    ).join('');
+  };
+
+  const altCard = (a) => {
+    const ppm = a.price_per_m2 ?? (a.price_rub && a.total_area_m2 ? a.price_rub/a.total_area_m2 : null);
+    const imgSrc = a.image_url ? a.image_url.replace(/"/g,'&quot;') : '';
+    const isSimilar = !!a._similar;
+    const overlay = isSimilar
+      ? `<span class="absolute top-3 left-3 inline-flex items-center gap-1.5 h-6 px-2 rounded-full bg-slate-900 text-white text-[11px] font-medium">Похожая · d=${(a.distance ?? 0).toFixed(3)}</span>`
+      : (Number.isFinite(a.distance)
+          ? `<span class="absolute top-3 left-3 inline-flex h-6 px-2 rounded-full bg-white/95 text-[11px] text-slate-700">d=${a.distance.toFixed(3)}</span>`
+          : '');
+    const photo = imgSrc
+      ? `<div class="aspect-[4/3] bg-slate-100 relative overflow-hidden">
+           <img src="${imgSrc}" alt="" loading="lazy" referrerpolicy="no-referrer"
+                class="absolute inset-0 w-full h-full object-cover"
+                onerror="this.style.display='none';this.parentNode.classList.add('grid-photo');" />
+           ${overlay}
+         </div>`
+      : `<div class="aspect-[4/3] grid-photo relative">
+           ${overlay}
+         </div>`;
+    const cls = `tile tile-hover overflow-hidden cursor-pointer ring-focus block${isSimilar ? ' alt-similar' : ''}`;
+    return `
+      <a href="${a.url}" target="_blank" rel="noopener" class="${cls}">
+        ${photo}
+        <div class="p-4">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="display text-xl text-slate-900">${fmtMln(a.price_rub)}</span>
+            <span class="text-[11px] text-slate-500">${fmtPpm(ppm)}</span>
+          </div>
+          <div class="mt-1 text-sm text-slate-700">${fmtArea(a.total_area_m2)} · ${a.floor ?? '—'}/${a.floors_total ?? '—'} этаж</div>
+          <div class="text-xs text-slate-500 mt-1 line-clamp-2">${a.snippet || ''}</div>
+        </div>
+      </a>`;
+  };
+
+  function renderAlternatives(items){
+    if (!items.length){
+      altGrid.innerHTML = '<div class="col-span-full tile p-6 text-sm text-slate-500">Под фильтры ничего не подошло.</div>';
+      altMeta.textContent = '';
+      return;
+    }
+    altGrid.innerHTML = items.map(altCard).join('');
+    altMeta.textContent = `показано ${items.length}`;
+  }
+
+  // ---- Tabs / All listings ----
+  const tabAll = $('tab-all');
+  const tabSimilar = $('tab-similar');
+  const sortSelect = $('sort-select');
+  const loadMoreBtn = $('load-more');
+  const reportSectionEl = () => $('report-section');
+
+  let mode = 'all';            // 'all' | 'similar'
+  let allListings = [];        // загружено из /api/listings (накопительно)
+  let allTotal = 0;
+  let allOffset = 0;
+  const PAGE_SIZE = 24;
+  let loadingPage = false;
+  const similarKeys = new Set(); // listing_id'ы похожих, чтобы подсветить в общей сетке
+
+  function listingKey(item){
+    return item.listing_id ?? item.url ?? '';
+  }
+
+  function setMode(next){
+    mode = next;
+    tabAll.classList.toggle('active', mode === 'all');
+    tabSimilar.classList.toggle('active', mode === 'similar');
+    if (targetSection) targetSection.classList.toggle('hidden', mode === 'all' || !targetCard.dataset.filled);
+    rerender();
+  }
+
+  function mergeSimilarFlags(items){
+    if (!similarKeys.size) return items;
+    return items.map(it => similarKeys.has(listingKey(it)) ? {...it, _similar: true} : it);
+  }
+
+  function rerender(){
+    if (mode === 'similar'){
+      loadMoreBtn.classList.add('hidden');
+      const filtered = allAlternatives.filter(passesFilters).map(a => ({...a, _similar: true}));
+      renderAlternatives(filtered);
+      altMeta.textContent = allAlternatives.length
+        ? `${filtered.length} из ${allAlternatives.length} похожих`
+        : 'нет результатов анализа';
+      return;
+    }
+    // mode === 'all': похожие поднимаем наверх, остальные — далее
+    const flagged = mergeSimilarFlags(allListings);
+    const similar = flagged.filter(i => i._similar);
+    const others = flagged.filter(i => !i._similar);
+    const ordered = [...similar, ...others];
+    const filtered = ordered.filter(passesFilters);
+    renderAlternatives(filtered);
+    const loaded = allListings.length;
+    const tail = allTotal ? ` из ${allTotal.toLocaleString('ru-RU')}` : '';
+    const simNote = similar.length ? ` · ${similar.length} похожих` : '';
+    altMeta.textContent = `показано ${filtered.length}${tail}${simNote}`;
+    loadMoreBtn.classList.toggle('hidden', loaded >= allTotal);
+  }
+
+  // Переопределяем applyFilters: теперь это просто перерисовка текущего режима.
+  applyFilters = function(){ rerender(); };
+
+  async function fetchListingsPage(reset){
+    if (loadingPage) return;
+    loadingPage = true;
+    if (reset){ allListings = []; allOffset = 0; }
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(allOffset),
+      sort: sortSelect.value,
+    });
+    try {
+      const r = await fetch(API('/api/listings?' + params.toString()));
+      if (!r.ok) throw new Error(r.statusText);
+      const data = await r.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      allListings = allListings.concat(items);
+      allOffset += items.length;
+      allTotal = data.total || allListings.length;
+    } catch (e) {
+      console.warn('listings failed', e);
+      altMeta.textContent = 'не удалось загрузить квартиры';
+    } finally {
+      loadingPage = false;
+      if (mode === 'all') rerender();
+    }
+  }
+
+  tabAll.addEventListener('click', () => setMode('all'));
+  tabSimilar.addEventListener('click', () => {
+    if (tabSimilar.disabled) return;
+    setMode('similar');
+  });
+  sortSelect.addEventListener('change', () => {
+    if (mode === 'all') fetchListingsPage(true);
+  });
+  loadMoreBtn.addEventListener('click', () => fetchListingsPage(false));
+
+  function galleryHTML(images, dot, label){
+    if (!images.length) {
+      return `
+        <div class="relative aspect-[16/10] grid-photo" data-gallery>
+          <span class="absolute top-4 left-4 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-white/90 text-[11px] font-medium text-slate-700">
+            <span class="w-1.5 h-1.5 rounded-full ${dot}"></span>${label}
+          </span>
+        </div>`;
+    }
+    const first = images[0].replace(/"/g,'&quot;');
+    return `
+      <div class="relative aspect-[16/10] bg-slate-100 overflow-hidden" data-gallery tabindex="0">
+        <img data-gallery-img src="${first}" alt="Фото объявления"
+             class="absolute inset-0 w-full h-full object-cover transition-opacity duration-200"
+             loading="eager" referrerpolicy="no-referrer"
+             onerror="this.dataset.failed='1';this.style.display='none';this.parentNode.classList.add('grid-photo');" />
+        <span class="absolute top-4 left-4 inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-white/90 text-[11px] font-medium text-slate-700">
+          <span class="w-1.5 h-1.5 rounded-full ${dot}"></span>${label}
+        </span>
+        ${images.length > 1 ? `
+          <button type="button" data-gallery-prev aria-label="Предыдущее фото"
+                  class="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-900 shadow flex items-center justify-center cursor-pointer ring-focus transition-colors duration-200">
+            <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <button type="button" data-gallery-next aria-label="Следующее фото"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white text-slate-900 shadow flex items-center justify-center cursor-pointer ring-focus transition-colors duration-200">
+            <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          <span data-gallery-counter
+                class="absolute bottom-3 right-3 inline-flex items-center h-7 px-2.5 rounded-full bg-black/60 text-white text-[11px] font-medium">
+            1 / ${images.length}
+          </span>
+        ` : ''}
+      </div>`;
+  }
+
+  function attachGallery(gallery, images){
+    if (!gallery || images.length < 2) return;
+    const imgEl = gallery.querySelector('[data-gallery-img]');
+    const counter = gallery.querySelector('[data-gallery-counter]');
+    let idx = 0;
+    const show = (next) => {
+      idx = (next + images.length) % images.length;
+      imgEl.style.display = '';
+      gallery.classList.remove('grid-photo');
+      imgEl.style.opacity = '0';
+      imgEl.src = images[idx];
+      imgEl.onload = () => { imgEl.style.opacity = '1'; };
+      if (counter) counter.textContent = `${idx + 1} / ${images.length}`;
+    };
+    gallery.querySelector('[data-gallery-prev]').addEventListener('click', (e) => { e.preventDefault(); show(idx - 1); });
+    gallery.querySelector('[data-gallery-next]').addEventListener('click', (e) => { e.preventDefault(); show(idx + 1); });
+    gallery.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') { e.preventDefault(); show(idx - 1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); show(idx + 1); }
+    });
+  }
+
+  async function lazyLoadImages(targetUrl, dot, label){
+    if (!targetUrl) return;
+    const placeholder = targetCard.querySelector('[data-gallery]');
+    const loadingPill = document.createElement('span');
+    loadingPill.className = 'absolute bottom-3 right-3 inline-flex items-center h-7 px-2.5 rounded-full bg-black/60 text-white text-[11px] font-medium';
+    loadingPill.textContent = 'Загружаем фото…';
+    if (placeholder) placeholder.appendChild(loadingPill);
+    console.log('[gallery] lazy fetch', targetUrl);
+    try {
+      const r = await fetch(API('/api/images?url=' + encodeURIComponent(targetUrl)));
+      console.log('[gallery] /api/images status', r.status);
+      if (!r.ok) {
+        if (placeholder) {
+          loadingPill.textContent = r.status === 404
+            ? 'Перезапустите сервер: /api/images недоступен'
+            : `Не удалось загрузить фото (HTTP ${r.status})`;
+        }
+        return;
+      }
+      const data = await r.json();
+      const imgs = Array.isArray(data.images) ? data.images.filter(Boolean) : [];
+      console.log('[gallery] got', imgs.length, 'images');
+      if (!imgs.length) {
+        if (placeholder) loadingPill.textContent = 'Фото не найдены';
+        return;
+      }
+      const old = targetCard.querySelector('[data-gallery]');
+      if (!old) return;
+      old.outerHTML = galleryHTML(imgs, dot, label);
+      attachGallery(targetCard.querySelector('[data-gallery]'), imgs);
+    } catch (e) {
+      console.warn('[gallery] lazy fetch failed', e);
+      if (placeholder) loadingPill.textContent = 'Ошибка сети при загрузке фото';
+    }
+  }
+
+  function renderTarget(t){
+    const ppm = t.price_per_m2 ?? (t.price_rub && t.total_area_m2 ? t.price_rub/t.total_area_m2 : null);
+    const sourceMap = {
+      dataset: ['bg-emerald-500', 'Из датасета'],
+      scrape_api: ['bg-amber-500', 'Cian API'],
+      scrape_html: ['bg-amber-500', 'Cian HTML (fallback)'],
+      scrape: ['bg-amber-500', 'Cian API'],
+    };
+    const [dot, label] = sourceMap[t.source] || ['bg-slate-400', t.source || '—'];
+    const images = Array.isArray(t.images) ? t.images.filter(Boolean) : [];
+
+    targetCard.innerHTML = `
+      ${galleryHTML(images, dot, label)}
+      <div class="p-6">
+        <div class="flex items-baseline justify-between gap-4">
+          <h3 class="display text-3xl text-slate-900">${titleFromDescription(t.description) || ('Объявление ' + (t.listing_id ?? ''))}</h3>
+          <div class="display text-3xl text-slate-900 whitespace-nowrap">${fmtMln(t.price_rub)}</div>
+        </div>
+        <a href="${t.url}" target="_blank" rel="noopener" class="mt-2 text-sm text-slate-500 hover:text-slate-900 transition-colors duration-200 truncate block">${t.url ?? ''}</a>
+        <div class="mt-5 flex flex-wrap gap-2">
+          <span class="pill h-7 px-3 rounded-full text-xs text-slate-700">${fmtArea(t.total_area_m2)}</span>
+          <span class="pill h-7 px-3 rounded-full text-xs text-slate-700">${t.floor ?? '—'} / ${t.floors_total ?? '—'} этаж</span>
+          <span class="pill h-7 px-3 rounded-full text-xs text-slate-700">${fmtPpm(ppm)}</span>
+        </div>
+        ${t.description ? `<p class="mt-5 text-[14px] text-slate-600 leading-relaxed line-clamp-5">${t.description.replace(/</g,'&lt;')}</p>` : ''}
+      </div>`;
+
+    attachGallery(targetCard.querySelector('[data-gallery]'), images);
+    targetCard.dataset.filled = '1';
+    if (targetSection) targetSection.classList.remove('hidden');
+
+    // If analyze didn't return images (dataset path or empty scrape), backfill them async.
+    if (!images.length) {
+      lazyLoadImages(t.url, dot, label);
+    }
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    err.classList.add('hidden');
+    const url = input.value.trim();
+    if (!url) return;
+
+    btn.disabled = true;
+    const oldLabel = btn.textContent;
+    btn.textContent = 'Анализ…';
+    altSkeleton();
+    altMeta.textContent = 'идёт поиск похожих…';
+    reportSection.classList.add('hidden');
+
+    try {
+      const r = await fetch(API('/api/analyze'), {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          url,
+          k: 8,
+          report: $('report').checked,
+          no_scrape: false,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || r.statusText);
+
+      renderTarget(data.target);
+
+      allAlternatives = Array.isArray(data.alternatives) ? data.alternatives : [];
+      similarKeys.clear();
+      allAlternatives.forEach(a => similarKeys.add(listingKey(a)));
+      tabSimilar.disabled = allAlternatives.length === 0;
+      setMode(allAlternatives.length ? 'similar' : 'all');
+
+      if (data.report){
+        $('report-body').textContent = data.report;
+        $('report-meta').textContent = data.target.source === 'dataset' ? 'на основе датасета' : 'на основе свежего скрейпа';
+        reportSection.classList.remove('hidden');
+        reportSection.scrollIntoView({behavior:'smooth', block:'start'});
+      }
+    } catch (ex) {
+      err.textContent = `Ошибка: ${ex.message}`;
+      err.classList.remove('hidden');
+      altGrid.innerHTML = '';
+      altMeta.textContent = '';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldLabel;
+    }
+  });
+
+  // Initial state — стартуем во вкладке «Все», подгружаем первую страницу.
+  setMode('all');
+  fetchListingsPage(true);
+
+  loadStats();
+
+  // ---- Stats drawer ----
+  const drawer = $('stats-drawer');
+  const openDrawer = () => drawer.classList.remove('hidden');
+  const closeDrawer = () => drawer.classList.add('hidden');
+  $('stats-toggle').addEventListener('click', openDrawer);
+  $('stats-close').addEventListener('click', closeDrawer);
+  $('stats-backdrop').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+})();
+</script>
+
+<footer class="border-t border-[var(--line)]">
+  <div class="max-w-7xl mx-auto px-6 py-6 text-xs text-slate-500 flex items-center justify-between">
+    <span>© Kvartal</span>
+    <span>Python · Pandera · DVC</span>
+  </div>
+</footer>
+
+</body>
+</html>

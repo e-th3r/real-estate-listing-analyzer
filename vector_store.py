@@ -60,6 +60,9 @@ def frame_to_documents(frame: pd.DataFrame) -> List[Document]:
             "longitude": float(row["longitude"]),
             "price_per_m2": float(row["price_rub"]) / float(row["total_area_m2"]),
         }
+        image_url = row["image_url"] if "image_url" in row.index else None
+        if image_url is not None and pd.notna(image_url) and str(image_url).strip():
+            metadata["image_url"] = str(image_url)
         documents.append(
             Document(
                 page_content=str(row["description"]),

@@ -1,10 +1,105 @@
 ﻿import argparse
 import json
-from typing import Any, Dict, List, Optional
+import subprocess
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import cianparser
 
-from main import analyze_many, write_records_and_dvc_track
+from cian_scraper import scrape_cian_listing_via_cianpython
+
+
+def analyze_cian_listing(url: str) -> Dict[str, Any]:
+    data = scrape_cian_listing_via_cianpython(url)
+    data["url"] = url
+    return data
+
+
+def analyze_many(
+    urls: Iterable[str],
+    *,
+    max_workers: int = 8,
+    per_url_timeout: float = 60.0,
+    progress_every: int = 10,
+) -> List[Tuple[str, Dict[str, Any], str]]:
+    url_list = list(urls)
+    total = len(url_list)
+    results: List[Tuple[str, Dict[str, Any], str]] = []
+    done = 0
+    ok = 0
+    err = 0
+    start = time.monotonic()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_url = {executor.submit(analyze_cian_listing, url): url for url in url_list}
+        for future in as_completed(future_to_url):
+            url = future_to_url[future]
+            try:
+                data = future.result(timeout=per_url_timeout)
+                results.append((url, data, ""))
+                ok += 1
+            except FutureTimeoutError:
+                future.cancel()
+                results.append((url, {}, f"timeout>{per_url_timeout}s"))
+                err += 1
+            except Exception as exc:  # noqa: BLE001
+                results.append((url, {}, str(exc)))
+                err += 1
+
+            done += 1
+            if done % progress_every == 0 or done == total:
+                elapsed = time.monotonic() - start
+                rate = done / elapsed if elapsed > 0 else 0.0
+                eta = (total - done) / rate if rate > 0 else 0.0
+                print(
+                    f"[analyze_many] {done}/{total} (ok={ok}, err={err}) "
+                    f"elapsed={elapsed:.0f}s eta={eta:.0f}s",
+                    file=sys.stderr,
+                    flush=True,
+                )
+    return results
+
+
+def write_records_and_dvc_track(records: List[Dict[str, Any]], *, source: str) -> Path:
+    root = Path(__file__).resolve().parent
+    raw_dir = root / "data" / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    output_path = raw_dir / f"cian_{source}_{ts}.ndjson"
+    with output_path.open("w", encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record, ensure_ascii=False))
+            f.write("\n")
+
+    dvc_commands = [
+        ["dvc", "add", "data"],
+        [sys.executable, "-m", "dvc", "add", "data"],
+        ["uv", "run", "python", "-m", "dvc", "add", "data"],
+    ]
+    last_result: subprocess.CompletedProcess[str] | None = None
+    for cmd in dvc_commands:
+        try:
+            result = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
+        except FileNotFoundError:
+            continue
+        last_result = result
+        if result.returncode == 0:
+            break
+    if last_result is None or last_result.returncode != 0:
+        stdout = last_result.stdout.strip() if last_result else ""
+        stderr = last_result.stderr.strip() if last_result else ""
+        raise RuntimeError(
+            "Не удалось обновить DVC-трекинг для data. Установи DVC и выполни `dvc add data`. "
+            f"stdout: {stdout} "
+            f"stderr: {stderr}"
+        )
+
+    return output_path
 
 
 def _parse_rooms(raw: str) -> Any:
@@ -31,26 +126,65 @@ def discover_urls(
     start_page: int,
     end_page: int,
     proxies: Optional[List[str]] = None,
+    batch_size: int = 5,
+    max_empty_batches: int = 2,
 ) -> List[str]:
-    parser = cianparser.CianParser(location=location, proxies=proxies)
-    listings: List[Dict[str, Any]] = parser.get_flats(
-        deal_type=deal_type,
-        rooms=rooms,
-        with_saving_csv=False,
-        with_extra_data=False,
-        additional_settings={"start_page": start_page, "end_page": end_page},
-    )
-
+    # Cian после ~28-54 страниц начинает повторять те же объявления, поэтому
+    # бьём диапазон на батчи и выходим, когда несколько батчей подряд не дают
+    # новых URL — иначе cianparser молча листает страницы с дубликатами.
     seen: set[str] = set()
     urls: List[str] = []
-    for item in listings:
-        url = item.get("url")
-        if not isinstance(url, str) or not url:
+    empty_batches = 0
+
+    page = start_page
+    while page <= end_page:
+        batch_end = min(page + batch_size - 1, end_page)
+        parser = cianparser.CianParser(location=location, proxies=proxies)
+        try:
+            listings: List[Dict[str, Any]] = parser.get_flats(
+                deal_type=deal_type,
+                rooms=rooms,
+                with_saving_csv=False,
+                with_extra_data=False,
+                additional_settings={"start_page": page, "end_page": batch_end},
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[discover_urls] батч {page}-{batch_end} упал: {exc}",
+                file=sys.stderr,
+            )
+            page = batch_end + 1
             continue
-        if url in seen:
-            continue
-        seen.add(url)
-        urls.append(url)
+
+        new_count = 0
+        for item in listings:
+            url = item.get("url")
+            if not isinstance(url, str) or not url:
+                continue
+            if url in seen:
+                continue
+            seen.add(url)
+            urls.append(url)
+            new_count += 1
+
+        print(
+            f"[discover_urls] страницы {page}-{batch_end}: "
+            f"+{new_count} новых URL (всего {len(urls)})"
+        )
+
+        if new_count == 0:
+            empty_batches += 1
+            if empty_batches >= max_empty_batches:
+                print(
+                    f"[discover_urls] {empty_batches} батчей подряд без новых URL — "
+                    f"ранний выход на странице {batch_end}"
+                )
+                break
+        else:
+            empty_batches = 0
+
+        page = batch_end + 1
+
     return urls
 
 
@@ -103,6 +237,24 @@ def main() -> None:
         help="РџР°СЂР°Р»Р»РµР»СЊРЅРѕСЃС‚СЊ РїСЂРё РѕР±РѕРіР°С‰РµРЅРёРё С‡РµСЂРµР· Cian API (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ 2)",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=5,
+        help="Сколько страниц обрабатывать за один прогон cianparser (по умолчанию 5)",
+    )
+    parser.add_argument(
+        "--max-empty-batches",
+        type=int,
+        default=2,
+        help="Сколько батчей подряд без новых URL допускается перед ранним выходом (по умолчанию 2)",
+    )
+    parser.add_argument(
+        "--per-url-timeout",
+        type=float,
+        default=60.0,
+        help="Максимальное время на обогащение одного URL в секундах (по умолчанию 60)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="РўРѕР»СЊРєРѕ СЃРѕР±СЂР°С‚СЊ URL Рё РЅР°РїРµС‡Р°С‚Р°С‚СЊ РёС…, Р±РµР· РѕР±РѕРіР°С‰РµРЅРёСЏ Рё DVC",
@@ -117,6 +269,8 @@ def main() -> None:
         rooms=rooms,
         start_page=args.start_page,
         end_page=args.end_page,
+        batch_size=args.batch_size,
+        max_empty_batches=args.max_empty_batches,
     )
     print(f"[auto_parser] РќР°Р№РґРµРЅРѕ {len(urls)} СѓРЅРёРєР°Р»СЊРЅС‹С… URL")
 
@@ -129,7 +283,11 @@ def main() -> None:
         print("[auto_parser] РќРµС‚ URL РґР»СЏ РѕР±РѕРіР°С‰РµРЅРёСЏ, РІС‹С…РѕР¶Сѓ.")
         return
 
-    batch_results = analyze_many(urls, max_workers=args.max_workers)
+    batch_results = analyze_many(
+        urls,
+        max_workers=args.max_workers,
+        per_url_timeout=args.per_url_timeout,
+    )
 
     output: List[Dict[str, Any]] = []
     ok_count = 0

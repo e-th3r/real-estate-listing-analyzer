@@ -1,4 +1,4 @@
-﻿# Real Estate Listing Analyzer
+# Real Estate Listing Analyzer
 
 Проект для сбора объявлений Циан, валидации данных через Pandera, очистки
 аномалий, индексации в локальной векторной базе (Chroma + multilingual
@@ -10,12 +10,9 @@ sentence-transformers) и генерации LLM-отчёта о выгодно�
 
 ## Что умеет проект
 
-- Скрейпинг объявления Циан по URL (Cian API + HTML fallback)
 - Авто-сбор по городу через `cianparser` + обогащение через Cian API
-- Разбор локального HTML объявления
 - Автосохранение сырых записей в `data/raw/*.ndjson`
-- Валидация схемы и правил качества через Pandera
-- Очистка датасета от аномалий и экспорт в `.parquet`
+- Очистка датасета от аномалий через Pandera и экспорт в `.parquet`
 - Построение векторного индекса Chroma поверх чистого parquet
 - Семантический поиск похожих объявлений
 - LLM-отчёт «выгодная / средняя / переоценённая сделка» с разбором плюсов и минусов
@@ -27,8 +24,7 @@ sentence-transformers) и генерации LLM-отчёта о выгодно�
 ```text
 real-estate-listing-analyzer/
 ├── cian_scraper.py            # Cian API + HTML парсер
-├── main.py                    # ручной ингест по URL (строгая валидация)
-├── auto_parser.py             # авто-ингест по городу (без валидации)
+├── auto_parser.py             # авто-ингест по городу
 ├── dataset_schema.py          # Pandera-схема и правила качества
 ├── build_clean_dataset.py     # NDJSON → чистый parquet + аномалии
 ├── vector_store.py            # Chroma + HuggingFaceEmbeddings
@@ -54,7 +50,8 @@ real-estate-listing-analyzer/
 - Git
 - DVC (`dvc[ssh]`)
 - Synology NAS DS218 c SSH-доступом
-- Доступ к LLM-эндпоинту (LM Studio / Ollama / OpenAI-совместимый) — только для отчётов
+- Доступ к LLM-эндпоинту: Together AI (рекомендуется), LM Studio / Ollama или любой
+  OpenAI-совместимый — только для отчётов
 
 ## Установка (Windows PowerShell)
 
@@ -75,35 +72,7 @@ pip install "dvc[ssh]"
 uv sync
 ```
 
-## 1. Сбор сырых данных
-
-Точка входа: `main.py`
-
-```powershell
-python main.py --help
-```
-
-Режимы запуска:
-
-```powershell
-# Один URL
-python main.py --url "https://www.cian.ru/sale/flat/328442756/"
-
-# Batch из файла URL
-python main.py --urls-file "C:\path\to\urls.txt"
-python main.py --urls-file "C:\path\to\urls.txt" --ndjson
-
-# Разбор локального HTML
-python main.py --html-file "C:\path\to\listing.html"
-```
-
-После запуска `main.py`:
-
-- Проверяет данные по Pandera-схеме (`dataset_schema.py`)
-- Сохраняет сырые данные в `data/raw/*.ndjson`
-- Выполняет `dvc add data`
-
-## 1b. Авто-сбор по городу (без ручного списка URL)
+## 1. Авто-сбор сырых данных
 
 Скрипт `auto_parser.py` автоматически находит объявления через
 [NurjahonErgashevMe/cianparser](https://github.com/NurjahonErgashevMe/cianparser)
@@ -118,12 +87,15 @@ python auto_parser.py --location "Москва" --deal-type sale --rooms "1,2,3"
 python auto_parser.py --location "Санкт-Петербург" --rooms all --end-page 5 --dry-run
 ```
 
-Ключевое отличие от `main.py`:
+После запуска `auto_parser.py`:
 
-- Pandera-валидация **не применяется на входе**: массовый сбор неизбежно
-  содержит аномалии, и их фильтрация делегирована `build_clean_dataset.py`.
-- `cianparser` не возвращает координаты, поэтому обогащение через Cian API
-  обязательно — без координат строки всё равно будут отсеяны на шаге 2.
+- Сохраняет сырые данные в `data/raw/*.ndjson`
+- Выполняет `dvc add data`
+
+Pandera-валидация **не применяется на входе**: массовый сбор неизбежно
+содержит аномалии, и их фильтрация делегирована `build_clean_dataset.py`.
+`cianparser` не возвращает координаты, поэтому обогащение через Cian API
+обязательно — без координат строки всё равно будут отсеяны на шаге 2.
 
 ## 2. Очистка и сбор финального датасета
 
@@ -219,15 +191,36 @@ python webapp/server.py
 
 ### LLM-конфигурация
 
-`report_generator.build_default_llm` читает переменные окружения:
+`report_generator.build_default_llm` подхватывает конфиг из `.env`
+(автоматически через `python-dotenv`) или из переменных окружения. Образец —
+в [.env.example](.env.example): скопируйте его в `.env` и впишите свой ключ.
 
-```bash
-export LISTING_LLM_BASE_URL="http://localhost:1234/v1"   # LM Studio / Ollama
-export LISTING_LLM_MODEL="qwen2.5-7b-instruct"
-export LISTING_LLM_API_KEY="local"
+**Together AI (рекомендуется, serverless):** достаточно одной переменной —
+`TOGETHER_API_KEY`. Базовый URL и модель проставляются автоматически:
+
+```dotenv
+# .env
+TOGETHER_API_KEY=tgp_v1_...
+# Опционально (по умолчанию deepseek-ai/DeepSeek-V3):
+# LISTING_LLM_MODEL=Qwen/Qwen2.5-72B-Instruct-Turbo
 ```
 
-Для облачного OpenAI достаточно `OPENAI_API_KEY` + `LISTING_LLM_MODEL=gpt-4o-mini`.
+При этом `build_default_llm` ставит `base_url=https://api.together.xyz/v1` и
+модель `deepseek-ai/DeepSeek-V3` — serverless-эндпоинт, оплата по токенам.
+
+**Локальный LM Studio / Ollama:**
+
+```dotenv
+LISTING_LLM_BASE_URL=http://localhost:1234/v1
+LISTING_LLM_MODEL=qwen2.5-7b-instruct
+LISTING_LLM_API_KEY=local
+```
+
+**Облачный OpenAI:** `OPENAI_API_KEY` + `LISTING_LLM_MODEL=gpt-4o-mini`.
+
+Приоритет: явные CLI-флаги (`--llm-*`) → `LISTING_LLM_*` → `TOGETHER_API_KEY`
+→ `OPENAI_API_KEY`. Файл `.env` должен лежать в корне проекта; он уже в
+`.gitignore` — **никогда не коммитьте реальный ключ**.
 
 ## Схема Pandera и правила качества
 
@@ -253,7 +246,6 @@ export LISTING_LLM_API_KEY="local"
 
 Поведение:
 
-- В `main.py` нарушение схемы прерывает сохранение в DVC
 - В `build_clean_dataset.py` строки, не прошедшие схему, отбрасываются в файл аномалий
 
 ## Настройка DVC remote (Synology DS218 по SSH)
@@ -274,9 +266,7 @@ dvc push
 ## Типовой workflow
 
 ```powershell
-# 1) Собрать сырые данные — либо вручную по списку URL,
-python main.py --urls-file "C:\path\to\urls.txt" --ndjson
-#    либо в авто-режиме по городу
+# 1) Собрать сырые данные в авто-режиме по городу
 python auto_parser.py --location "Москва" --end-page 5
 
 # 2) Собрать чистый parquet
